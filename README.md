@@ -1,8 +1,12 @@
 # Mebel Monitor SPA (beta)
 
-Vite + React 19 + Tailwind 4 + shadcn + Cloudflare Pages + Supabase Free + offline Dexie.
+Vite + React 19 + Tailwind 4 + shadcn + Cloudflare Workers (static SPA) + Supabase Free + offline Dexie.
 
-Repo ini **paralel** dengan aplikasi Next.js produksi. Rollback = tetap pakai Next (`v1-next-stable`).
+**Baca dulu:** [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) · [AGENTS.md](./AGENTS.md)
+
+Repo ini **paralel** dengan aplikasi Next.js produksi. Rollback Next = tag `v1-next-stable`.
+
+**Syarat cutover:** UI SPA **sama persis** dengan Next (port tema/layout/halaman dari `Aplikasi monitoring`).
 
 ## Stack constraints (jangan dilanggar)
 
@@ -11,39 +15,14 @@ Repo ini **paralel** dengan aplikasi Next.js produksi. Rollback = tetap pakai Ne
 - SPA routing: `wrangler.jsonc` → `assets.not_found_handling = single-page-application` (jangan pakai `_redirects /* /index.html`).
 - Supabase Free akun klien: **2 project aktif sudah penuh** (1 website + 1 app monitoring). Tidak bisa buat project ketiga di akun yang sama.
 
-## Strategi database (pilih satu)
+## Strategi database (aktif: Opsi C)
 
-### Opsi B — disarankan (tetap gratis, isolasi aman)
+Akun Supabase klien sudah 2/2 Free project. **SPA memakai DB monitoring yang sama dengan Next.**
 
-Buat **akun/org Supabase baru** (email lain) khusus staging SPA.
-
-1. Daftar Supabase baru → 1 Free project staging.
-2. Jalankan SQL dari repo Next (`migration.sql`, inventori, fix linter).
-3. Seed user uji Owner/Karyawan (bukan data produksi).
-4. Isi `.env.local` SPA dengan URL + anon key **akun staging**.
-
-Produksi Next + website klien **tidak tersentuh**.
-
-### Opsi C — DB produksi yang sama (hanya jika B tidak memungkinkan)
-
-SPA beta memakai project Supabase **aplikasi monitoring** yang sama dengan Next.
-
-Aturan wajib:
-- Domain beta terpisah (`*.pages.dev`) — jangan ganti DNS produksi.
-- Uji hanya dengan akun uji / transaksi uji yang jelas.
-- Jangan deploy Edge Function eksperimen ke produksi tanpa review.
-- Offline sync hanya di device penguji.
-- Next tetap jadi app harian sampai cutover.
-
-Risiko: bug SPA bisa menulis data toko nyata.
-
-### Opsi A — pause project
-
-Tidak berlaku: kedua project sedang dipakai.
-
-### Opsi D — Supabase Pro
-
-Hanya jika klien mau bayar untuk project staging di akun yang sama.
+Aturan:
+- Domain beta Workers terpisah — jangan ganti DNS produksi sebelum cutover.
+- Uji dengan label `TEST-...` bila menulis data.
+- Next tetap app harian sampai UI + fitur kritis setara.
 
 ## Setup lokal
 

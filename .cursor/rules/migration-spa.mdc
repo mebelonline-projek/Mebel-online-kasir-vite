@@ -1,0 +1,34 @@
+---
+description: Migrasi SPA kasir — keputusan final, status, UI wajib sama dengan Next
+alwaysApply: true
+---
+
+# Migrasi SPA — aturan wajib
+
+Sebelum coding, baca `MIGRATION-HANDOFF.md`.
+
+## Final decisions
+
+- SPA repo terpisah dari Next. Jangan rewrite Next in-place untuk migrasi.
+- DB: **Opsi C** — satu project Supabase bersama Next (bukan staging project ketiga di akun klien).
+- Host: Cloudflare Workers **static assets / SPA** (`wrangler.jsonc`). Bukan Next SSR di Workers Free.
+- `service_role` hanya di Supabase Edge Functions.
+
+## UI (non-negotiable)
+
+**UI SPA harus sama persis dengan app Next** sebelum cutover.
+Sumber: folder sibling `Aplikasi monitoring` (`globals.css`, layout, transaksi, dashboard).
+UI minimal saat ini = sementara. Jangan anggap selesai tanpa parity visual.
+
+## Next steps (default)
+
+1. Uji hosting (online/offline/sync).
+2. UI parity (port dari Next).
+3. Edge Functions stok/user + modul sisa.
+4. Cutover terakhir; Next = fallback (`v1-next-stable`).
+
+## Deploy pitfalls
+
+- Jangan `_redirects /* /index.html 200` (error Workers).
+- Env Vite: Cloudflare **Build variables**, bukan Variables runtime (static-only Worker).
+- Setelah deploy env: hard refresh / clear SW jika masih “Konfigurasi diperlukan”.
