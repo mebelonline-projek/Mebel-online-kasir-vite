@@ -6,10 +6,9 @@ Repo ini **paralel** dengan aplikasi Next.js produksi. Rollback = tetap pakai Ne
 
 ## Stack constraints (jangan dilanggar)
 
-- Hosting: **Cloudflare Pages Free** (static). Jangan taruh logic berat di Workers Free (CPU 10ms).
+- Hosting: **Cloudflare Workers** (static assets / SPA). Jangan taruh logic berat di Worker Free (CPU 10ms).
 - Secret `service_role`: **hanya** di Supabase Edge Functions, tidak pernah di `VITE_*`.
-- SPA routing: Workers `assets.not_found_handling = single-page-application` (jangan pakai `_redirects /* /index.html` — bentrok di Workers).
-- Secret `service_role`: **hanya** di Supabase Edge Functions, tidak pernah di `VITE_*`.
+- SPA routing: `wrangler.jsonc` → `assets.not_found_handling = single-page-application` (jangan pakai `_redirects /* /index.html`).
 - Supabase Free akun klien: **2 project aktif sudah penuh** (1 website + 1 app monitoring). Tidak bisa buat project ketiga di akun yang sama.
 
 ## Strategi database (pilih satu)
