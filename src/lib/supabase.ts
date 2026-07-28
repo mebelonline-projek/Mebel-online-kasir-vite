@@ -1,17 +1,22 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || "").trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
 
-if (!supabaseUrl || !supabaseAnonKey) {
+const configured =
+  Boolean(supabaseUrl) &&
+  Boolean(supabaseAnonKey) &&
+  !supabaseUrl.includes("placeholder.supabase");
+
+if (!configured) {
   console.warn(
-    "[Supabase] VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY belum diset. Salin .env.example ke .env.local."
+    "[Supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY belum ada di build. Set Build variables di Cloudflare lalu Redeploy, atau pakai .env.local lokal."
   );
 }
 
 export const supabase = createClient(
-  supabaseUrl || "https://placeholder.supabase.co",
-  supabaseAnonKey || "placeholder",
+  configured ? supabaseUrl : "https://placeholder.supabase.co",
+  configured ? supabaseAnonKey : "placeholder",
   {
     auth: {
       autoRefreshToken: true,
@@ -23,7 +28,5 @@ export const supabase = createClient(
 );
 
 export function isSupabaseConfigured(): boolean {
-  return Boolean(
-    import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
-  );
+  return configured;
 }
