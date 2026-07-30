@@ -2,34 +2,59 @@
 
 Dokumen ini untuk AI agent / developer di **chat baru**. Jangan mengulang keputusan yang sudah final.
 
-## Lanjut besok (30 Jul 2026 malam) — baca ini dulu
+## Lanjut besok (31 Jul 2026) — baca ini dulu
 
-30 Jul: dashboard KPI OWNER di-port + Edge `apply-sale-stock` **sudah deploy** ke project `zmjcdltplreqnsnbaldl` + Cloudflare Build var + Redeploy Workers **sudah OK**.
+31 Jul: fitur klien di **Next** — search Gudang/Stok + varian produk (dengan/tanpa warna·ukuran). SQL: `supabase/migrate_product_variants.sql` (jalankan di shared Supabase jika belum).
 
-### Antrian prioritas (default jika user bilang “lanjut”)
+### Antrian prioritas SPA (default jika user bilang “lanjut”)
 
 1. **Void transaksi** — port logika Next; stok restore lewat Edge `apply-sale-stock` action restore (sudah live).
 2. Modul sisa: gudang/mutasi → operasional → piutang → invoice → pengaturan.
-3. Nota/PDF + HPP (boleh belakangan).
-4. Uji PWA HP toko / jaringan jelek (tawarkan lagi).
-5. Cutover domain **terakhir**; Next = fallback tag `v1-next-stable`.
+3. Saat port gudang/produk/kasir: ikut **search matrix** + **varian parent/child** dari Next (parity wajib).
+4. Nota/PDF + HPP (boleh belakangan).
+5. Uji PWA HP toko / jaringan jelek (tawarkan lagi).
+6. Cutover domain **terakhir**; Next = fallback tag `v1-next-stable`.
+
+### Fitur klien di Next → roadmap SPA (jangan kerjakan di SPA sekarang)
+
+Klien minta fitur baru sementara **produksi harian masih Next**. Keputusan 30–31 Jul:
+
+- **Implement di Next dulu** (repo `Aplikasi monitoring`) — **sudah dikerjakan 31 Jul**.
+- **SPA hanya catat di sini**; port saat modul terkait giliran migrasi (parity wajib).
+- DB **Opsi C shared** — SQL migrasi hidup di repo Next; SPA nanti baca kolom yang sama.
+
+| Fitur | Model / perilaku | Status Next | Masuk SPA kapan |
+|-------|------------------|-------------|-----------------|
+| Search Gudang/Stok | Client filter di matrix: nama/kategori/warna/ukuran + toggle Stok Menipis | Done `/gudang/stok` | Saat port `/gudang/stok` |
+| Varian warna + ukuran | Parent shell + child leaf: `parent_id`, `warna`, `ukuran`. Toggle “punya varian”. Stok/kasir/Edge per `product_id` leaf. Standalone = tanpa varian | Done SQL + UI barang/kasir/stok/mutasi | Saat port produk + kasir picker + cache katalog |
+
+**Jangan** klaim search/varian “selesai di SPA” sebelum modul di-port. **Jangan** pecah skema hanya di satu repo.
 
 ### Opsional smoke (user)
 
 - Hard refresh / clear SW di beta → kasir tanpa peringatan “Potong stok belum aktif” → jual 1 item → stok berkurang.
+- Next: jalankan `migrate_product_variants.sql` di SQL Editor jika kolom belum ada → buat barang dengan/tanpa varian → search stok → jual leaf di kasir.
 
-### Preferensi user (sesi 29 Jul)
+### Preferensi user (sesi 29–31 Jul)
 
 - SPA **cepat + multi-device aman** (local-first + Realtime + NetworkOnly SW).
 - UI parity dengan Next **wajib** sebelum cutover; jangan klaim “selesai” dengan UI generik.
+- Fitur klien baru: **Next dulu**, SPA ikut di roadmap saat port modul.
 - Delay deploy/uji hosting ekstra sampai diminta.
 - PowerShell: `;` bukan `&&`.
+
+### Baru selesai (31 Jul) — di Next, bukan SPA
+
+- Search `/gudang/stok` + filter Stok Menipis
+- SQL `parent_id` / `warna` / `ukuran` (`migrate_product_variants.sql`)
+- UI barang: toggle varian; kasir/mutasi/stok pakai leaf saja
 
 ### Baru selesai (30 Jul) — jangan kerjakan ulang
 
 - Dashboard KPI OWNER: `src/lib/date-utils.ts`, `src/lib/dashboard.ts` (anon+RLS), Dexie cache, UI parity Next (period tabs, 4 KPI + sparkline, recharts, transaksi terbaru)
 - `recharts` + shadcn `tabs`; live refresh via `useLiveData` + Realtime existing
-- Edge `apply-sale-stock` **deployed** (project `zmjcdltplreqnsnbaldl`); `.env.local` sudah isi URL Edge. `SUPABASE_SERVICE_ROLE_KEY` otomatis tersedia di runtime Edge — tidak perlu set secret manual.
+- Edge `apply-sale-stock` **deployed** (project `zmjcdltplreqnsnbaldl`); `.env.local` + Cloudflare Build var URL Edge OK
+- Push `main` `e292e27` → Cloudflare build hijau; clear SW jika UI lama tertinggal
 
 ### Baru selesai (29 Jul malam) — jangan kerjakan ulang
 
@@ -39,13 +64,14 @@ Dokumen ini untuk AI agent / developer di **chat baru**. Jangan mengulang keputu
 - Skin + katalog kasir + CRUD pelanggan/produk
 - Fondasi UI: tokens `index.css`, shell, Inter/Playfair
 
-### Prompt tempel chat baru
+### Prompt tempel chat baru (migrasi SPA)
 
 ```
 Lanjut migrasi SPA kasir (repo aplikasi-monitoring-spa).
 Baca MIGRATION-HANDOFF.md bagian "Lanjut besok" + AGENTS.md.
 DB Opsi C shared dengan Next; produksi harian masih Next.
 Edge apply-sale-stock + Build var Cloudflare sudah OK. Berikutnya default: void transaksi.
+Fitur search stok + varian sudah di Next (31 Jul); port SPA saat gudang/produk.
 UI harus sama persis dengan Next (folder sibling Aplikasi monitoring).
 ```
 
@@ -95,8 +121,8 @@ Ganti stack hosting Next/Vercel-berat dengan **Vite SPA** di Cloudflare Workers 
 
 ### Belum
 - [ ] Void transaksi (+ restore stok via Edge)
-- [ ] Void transaksi (+ restore stok via Edge)
 - [ ] Gudang / mutasi, operasional, piutang, invoice, pengaturan
+- [ ] Port search Gudang/Stok + varian parent/child dari Next (sudah ship di Next 31 Jul; ikut parity gudang/produk)
 - [ ] Nota/PDF, HPP
 - [ ] **UI parity penuh** sisa modul
 - [ ] Uji PWA di HP toko / jaringan jelek (tawarkan; user boleh delay)
@@ -138,6 +164,8 @@ Sumber kebenaran visual = app Next di `Aplikasi monitoring`:
 - Layout: `components/layout/` → SPA shell (**ported**)
 - Transaksi list/kasir/detail/pelunasan: skin dasar **ported**; void/nota belum
 - Dashboard: `app/(app)/dashboard/` → SPA `/dashboard` (**ported** KPI OWNER)
+- Gudang/stok: belum di SPA; saat port wajib ikut **search matrix** dari Next
+- Produk/varian: CRUD dasar SPA ada; saat port penuh wajib ikut **parent+child** (`parent_id`/`warna`/`ukuran`) dari Next
 - Komponen UI shadcn yang sudah dikustom (bertahap)
 
 ## Larangan

@@ -28,6 +28,12 @@ UI minimal = sementara. Jangan anggap selesai tanpa parity visual.
 
 Hosting online/offline sudah OK. Dashboard KPI OWNER sudah di-port. Edge `apply-sale-stock` sudah deploy + Build var Cloudflare OK. Jangan ulang uji hosting / fix cache Next kecuali diminta.
 
+## Fitur klien (Next dulu → SPA roadmap)
+
+- Search Gudang/Stok + varian parent/child (`parent_id`, `warna`, `ukuran`): **implement di Next** (produksi).
+- SPA **jangan** kerjakan sekarang. Port saat giliran modul gudang/produk (lihat tabel di `MIGRATION-HANDOFF.md`).
+- Stok/kasir/Edge tetap per `product_id` (leaf/child). Jangan pecah skema hanya di satu repo.
+
 ## Preferensi sesi
 
 - Cepat + multi-device aman (Dexie + Realtime + SW NetworkOnly).
@@ -37,4 +43,4 @@ Hosting online/offline sudah OK. Dashboard KPI OWNER sudah di-port. Edge `apply-
 
 - Jangan `_redirects /* /index.html 200` (error Workers).
 - Env Vite: Cloudflare **Build variables**, bukan Variables runtime (static-only Worker).
-- Setelah deploy env: hard refresh / clear SW jika masih “Konfigurasi diperlukan”.
+- Setelah deploy env: hard refresh / clear SW jika masih “Konfigurasi diperlukan” atau UI lama.
