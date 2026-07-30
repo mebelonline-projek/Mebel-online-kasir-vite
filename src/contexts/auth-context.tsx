@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { User } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { startRealtimeSync, stopRealtimeSync } from "@/lib/realtime";
 import type { UserProfile, UserRole } from "@/types/common";
 
 interface AuthContextValue {
@@ -73,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(current);
         const p = await fetchProfile(current.id);
         if (mounted) setProfile(p);
+        startRealtimeSync();
       }
       if (mounted) setLoading(false);
     }
@@ -87,19 +89,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (nextUser) {
         const p = await fetchProfile(nextUser.id);
         setProfile(p);
+        startRealtimeSync();
       } else {
         setProfile(null);
+        stopRealtimeSync();
       }
       setLoading(false);
     });
 
     return () => {
       mounted = false;
+      stopRealtimeSync();
       subscription.unsubscribe();
     };
   }, [configured]);
 
   const signOut = useCallback(async () => {
+    stopRealtimeSync();
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);

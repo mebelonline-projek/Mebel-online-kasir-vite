@@ -1,6 +1,6 @@
 # AGENTS.md — Konstitusi SPA Mebel Monitor
 
-Baca juga: [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) (status tahap + path).
+Baca juga: [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) — **bagian “Lanjut besok”** dulu (antrian prioritas), lalu status tahap + path.
 
 ## Prioritas
 

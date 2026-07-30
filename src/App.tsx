@@ -8,20 +8,21 @@ import { LoginPage } from "@/pages/login-page";
 import { RegisterPage } from "@/pages/register-page";
 import { KasirPage } from "@/pages/kasir-page";
 import { TransaksiListPage } from "@/pages/transaksi-list-page";
+import { TransaksiDetailPage } from "@/pages/transaksi-detail-page";
+import { PelunasanPage } from "@/pages/pelunasan-page";
 import { DashboardPage } from "@/pages/dashboard-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { CustomersPage } from "@/pages/customers-page";
+import { ProductsPage } from "@/pages/products-page";
 import { setupOfflineSyncListeners } from "@/lib/offline-sync";
+import { refreshCatalogCache } from "@/lib/catalog-cache";
 
 function OfflineBootstrap() {
   useEffect(() => {
     const cleanup = setupOfflineSyncListeners();
-    void import("@/lib/catalog-cache").then(({ refreshCatalogCache }) => {
-      if (navigator.onLine) void refreshCatalogCache();
-    });
+    if (navigator.onLine) void refreshCatalogCache();
     const onOnline = () => {
-      void import("@/lib/catalog-cache").then(({ refreshCatalogCache }) => {
-        void refreshCatalogCache();
-      });
+      void refreshCatalogCache();
     };
     window.addEventListener("online", onOnline);
     return () => {
@@ -53,17 +54,32 @@ export default function App() {
               <Route path="/dashboard" element={<OwnerDashboard />} />
               <Route path="/kasir" element={<KasirPage />} />
               <Route path="/transaksi" element={<TransaksiListPage />} />
+              <Route path="/transaksi/:id" element={<TransaksiDetailPage />} />
               <Route
-                path="/customer"
-                element={<PlaceholderPage title="Pelanggan" />}
+                path="/transaksi/:id/pelunasan"
+                element={<PelunasanPage />}
               />
-              <Route
-                path="/produk"
-                element={<PlaceholderPage title="Produk" />}
-              />
+              <Route path="/customer" element={<CustomersPage />} />
+              <Route path="/produk" element={<ProductsPage />} />
               <Route
                 path="/gudang"
                 element={<PlaceholderPage title="Gudang" />}
+              />
+              <Route
+                path="/piutang"
+                element={<PlaceholderPage title="Piutang" />}
+              />
+              <Route
+                path="/invoice"
+                element={<PlaceholderPage title="Invoice" />}
+              />
+              <Route
+                path="/operasional"
+                element={<PlaceholderPage title="Biaya Operasional" />}
+              />
+              <Route
+                path="/pengaturan"
+                element={<PlaceholderPage title="Pengaturan" />}
               />
             </Route>
           </Route>

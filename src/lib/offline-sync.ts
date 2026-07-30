@@ -3,6 +3,7 @@ import type { PendingTransaction } from "@/lib/offline-db";
 import { offlineDb } from "@/lib/offline-db";
 import { createTransaction } from "@/lib/transactions";
 import type { TransactionCreateValues } from "@/lib/validation";
+import { emitDataChanged } from "@/lib/data-events";
 
 let isSyncing = false;
 
@@ -25,6 +26,7 @@ export async function flushPendingTransactions(): Promise<number> {
         status: "syncing",
         errorMessage: undefined,
       });
+      emitDataChanged("sync");
 
       try {
         const result = await createTransaction({
@@ -40,17 +42,20 @@ export async function flushPendingTransactions(): Promise<number> {
           status: "synced",
         });
         synced += 1;
+        emitDataChanged("sync");
       } catch (error) {
         await offlineDb.pendingTransactions.update(item.clientId, {
           status: "failed",
           errorMessage:
             error instanceof Error ? error.message : "Sync gagal",
         });
+        emitDataChanged("sync");
       }
     }
 
     if (synced > 0) {
       toast.success(`${synced} transaksi offline berhasil disinkronkan`);
+      emitDataChanged("sync");
     }
   } finally {
     isSyncing = false;
@@ -72,6 +77,7 @@ export async function queueOfflineTransaction(
     createdAt: Date.now(),
   };
   await offlineDb.pendingTransactions.add(row);
+  emitDataChanged("create");
   return clientId;
 }
 
@@ -88,11 +94,25 @@ export function setupOfflineSyncListeners(): () => void {
     void flushPendingTransactions();
   };
 
+  const handleVisible = () => {
+    if (document.visibilityState !== "visible") return;
+    if (!navigator.onLine) return;
+    void getPendingCount().then((count) => {
+      if (count > 0) void flushPendingTransactions();
+    });
+  };
+
   window.addEventListener("online", handleOnline);
+  document.addEventListener("visibilitychange", handleVisible);
+  window.addEventListener("focus", handleVisible);
 
   if (navigator.onLine) {
     void flushPendingTransactions();
   }
 
-  return () => window.removeEventListener("online", handleOnline);
+  return () => {
+    window.removeEventListener("online", handleOnline);
+    document.removeEventListener("visibilitychange", handleVisible);
+    window.removeEventListener("focus", handleVisible);
+  };
 }

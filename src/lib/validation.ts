@@ -77,3 +77,56 @@ export const transactionCreateSchema = z
   );
 
 export type TransactionCreateValues = z.infer<typeof transactionCreateSchema>;
+
+export const paymentSchema = z.object({
+  transaction_id: z.string().min(1, "ID transaksi wajib"),
+  amount: z.coerce
+    .number()
+    .min(1, "Jumlah harus lebih dari 0")
+    .max(999_999_999, "Jumlah terlalu besar"),
+  method: z.enum(["TUNAI", "TRANSFER"], { error: "Pilih metode pembayaran" }),
+  note: z
+    .string()
+    .max(500, "Catatan maksimal 500 karakter")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type PaymentFormValues = z.infer<typeof paymentSchema>;
+
+export const customerSchema = z.object({
+  name: z.string().min(2, "Nama minimal 2 karakter").max(100, "Nama maksimal 100 karakter"),
+  phone: z.string().max(20, "Telepon maksimal 20 karakter").optional().or(z.literal("")),
+  address: z.string().max(300, "Alamat maksimal 300 karakter").optional().or(z.literal("")),
+  note: z.string().max(500, "Catatan maksimal 500 karakter").optional().or(z.literal("")),
+});
+
+export type CustomerFormValues = z.infer<typeof customerSchema>;
+
+export const productSchema = z.object({
+  name: z
+    .string()
+    .min(2, "Nama produk minimal 2 karakter")
+    .max(200, "Nama maksimal 200 karakter"),
+  category_id: z
+    .string()
+    .min(1, "Pilih kategori")
+    .regex(DB_UUID_RE, "ID kategori tidak valid"),
+  description: z
+    .string()
+    .max(500, "Deskripsi maksimal 500 karakter")
+    .optional()
+    .or(z.literal("")),
+  base_price: z.coerce
+    .number()
+    .min(0, "Harga tidak boleh negatif")
+    .max(999_999_999, "Harga terlalu besar"),
+});
+
+export type ProductFormValues = z.infer<typeof productSchema>;
+
+export const categorySchema = z.object({
+  name: z.string().min(2, "Nama kategori minimal 2 karakter").max(100),
+});
+
+export type CategoryFormValues = z.infer<typeof categorySchema>;

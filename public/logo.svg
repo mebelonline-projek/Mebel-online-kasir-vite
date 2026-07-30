@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#9a1a1a"/>
+      <stop offset="100%" stop-color="#5c0000"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="24" y1="20" x2="120" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="38" fill="url(#bg)"/>
+  <rect x="8" y="8" width="176" height="176" rx="32" fill="none" stroke="#e0c090" stroke-width="3" stroke-opacity="0.55"/>
+  <rect x="16" y="16" width="160" height="160" rx="28" fill="url(#shine)"/>
+  <!-- Kursi furnitur -->
+  <path d="M56 118h80v14H56v-14z" fill="#e0c090"/>
+  <path d="M64 78h64a8 8 0 0 1 8 8v32H56V86a8 8 0 0 1 8-8z" fill="#f5e6d0"/>
+  <path d="M52 124h88a6 6 0 0 1 6 6v8a4 4 0 0 1-4 4H50a4 4 0 0 1-4-4v-8a6 6 0 0 1 6-6z" fill="#c9a66b"/>
+  <rect x="72" y="62" width="48" height="18" rx="6" fill="#f5e6d0"/>
+  <path d="M72 80h48v6H72v-6z" fill="#e0c090"/>
+</svg>

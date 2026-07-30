@@ -1,30 +1,37 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { registerSchema } from "@/lib/validation";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 export function RegisterPage() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     const parsed = registerSchema.safeParse({ name, email, password });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Validasi gagal");
+      setError(parsed.error.issues[0]?.message || "Validasi gagal");
       return;
     }
 
     setLoading(true);
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error: signUpError } = await supabase.auth.signUp({
       email: parsed.data.email,
       password: parsed.data.password,
       options: {
@@ -32,14 +39,12 @@ export function RegisterPage() {
       },
     });
 
-    if (error || !data.user) {
+    if (signUpError || !data.user) {
       setLoading(false);
-      toast.error(error?.message || "Registrasi gagal");
+      setError(signUpError?.message || "Registrasi gagal");
       return;
     }
 
-    // Profil biasanya dibuat lewat RPC create_user_profile / trigger.
-    // Fallback insert self jika policy mengizinkan.
     const { error: profileError } = await supabase.from("users").upsert({
       id: data.user.id,
       name: parsed.data.name,
@@ -49,40 +54,47 @@ export function RegisterPage() {
 
     setLoading(false);
     if (profileError) {
-      toast.message("Akun dibuat", {
-        description:
-          "Profil mungkin perlu dibuat via RPC staging. Coba login.",
-      });
-    } else {
-      toast.success("Registrasi berhasil");
+      setError(
+        "Akun dibuat, tetapi profil mungkin perlu disiapkan. Coba login."
+      );
+      return;
     }
     navigate("/login", { replace: true });
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Daftar Owner</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Hanya untuk setup awal toko di staging
-          </p>
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md shadow-sm">
+        <CardHeader className="space-y-3 text-center">
+          <div className="flex justify-center">
+            <StoreLogo alt="Mebel Online" size="lg" className="shadow-md" />
+          </div>
+          <CardTitle className="font-serif text-2xl text-primary dark:neon-title">
+            Daftar Owner
+          </CardTitle>
+          <CardDescription>
+            Setup awal toko (staging / bootstrap). Produksi harian tetap Next
+            sampai cutover.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
+            {error && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/15 p-3 text-sm text-destructive">
+                {error}
+              </div>
+            )}
             <div className="space-y-2">
-              <Label htmlFor="name">Nama</Label>
+              <label className="text-sm font-medium">Nama</label>
               <Input
-                id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <label className="text-sm font-medium">Email</label>
               <Input
-                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -90,9 +102,8 @@ export function RegisterPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <label className="text-sm font-medium">Password</label>
               <Input
-                id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -105,7 +116,10 @@ export function RegisterPage() {
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Sudah punya akun?{" "}
-            <Link className="underline" to="/login">
+            <Link
+              className="font-medium text-accent hover:underline"
+              to="/login"
+            >
               Masuk
             </Link>
           </p>

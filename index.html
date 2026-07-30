@@ -10,6 +10,20 @@
       content="Monitoring toko furnitur — kasir offline-capable (SPA beta)"
     />
     <title>Mebel Monitor SPA</title>
+    <script>
+      !function () {
+        try {
+          var t = localStorage.getItem("theme") || "system";
+          if (t === "system") {
+            if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+              document.documentElement.classList.add("dark");
+            }
+          } else if (t === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      }();
+    </script>
   </head>
   <body>
     <div id="root"></div>

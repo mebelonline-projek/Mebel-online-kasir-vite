@@ -35,14 +35,13 @@ export default defineConfig({
         skipWaiting: true,
         runtimeCaching: [
           {
+            // Multi-device: jangan sajikan REST usang. Dexie handle offline UI.
             urlPattern: ({ url }) =>
               url.hostname.includes("supabase.co") &&
               url.pathname.includes("/rest/v1/"),
-            handler: "NetworkFirst",
+            handler: "NetworkOnly",
             options: {
               cacheName: "supabase-api",
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 64, maxAgeSeconds: 60 * 60 },
             },
           },
         ],

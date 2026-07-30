@@ -1,4 +1,5 @@
 import Dexie, { type EntityTable } from "dexie";
+import type { DashboardStats, PeriodType } from "@/lib/dashboard";
 import type { TransactionCreateValues } from "@/lib/validation";
 
 export interface PendingTransaction {
@@ -19,8 +20,49 @@ export interface CachedCustomer {
 export interface CachedProduct {
   id: string;
   name: string;
+  category: string;
   base_price: number;
   unit: string;
+  cachedAt: number;
+}
+
+export interface CachedWarehouse {
+  id: string;
+  name: string;
+  is_active: boolean;
+  is_sales_warehouse: boolean;
+  cachedAt: number;
+}
+
+export interface CachedStock {
+  /** `${warehouseId}:${productId}` */
+  id: string;
+  warehouse_id: string;
+  product_id: string;
+  qty: number;
+  cachedAt: number;
+}
+
+/** Snapshot list transaksi untuk paint instan (local-first). */
+export interface CachedTransactionRow {
+  id: string;
+  transaction_number: string;
+  customer_name: string | null;
+  description: string | null;
+  final_price: number;
+  payment_type: "CASH" | "DP";
+  dp_amount: number;
+  status: string;
+  fulfillment_status?: string | null;
+  created_at: string;
+  client_id?: string | null;
+  offlinePending?: boolean;
+  cachedAt: number;
+}
+
+export interface CachedDashboardRow {
+  period: PeriodType;
+  stats: DashboardStats;
   cachedAt: number;
 }
 
@@ -28,6 +70,10 @@ class OfflineDatabase extends Dexie {
   pendingTransactions!: EntityTable<PendingTransaction, "clientId">;
   cachedCustomers!: EntityTable<CachedCustomer, "id">;
   cachedProducts!: EntityTable<CachedProduct, "id">;
+  cachedTransactions!: EntityTable<CachedTransactionRow, "id">;
+  cachedWarehouses!: EntityTable<CachedWarehouse, "id">;
+  cachedStocks!: EntityTable<CachedStock, "id">;
+  cachedDashboard!: EntityTable<CachedDashboardRow, "period">;
 
   constructor() {
     super("MebelMonitorSpaOffline");
@@ -35,6 +81,29 @@ class OfflineDatabase extends Dexie {
       pendingTransactions: "clientId, status, createdAt",
       cachedCustomers: "id, name, cachedAt",
       cachedProducts: "id, name, cachedAt",
+    });
+    this.version(2).stores({
+      pendingTransactions: "clientId, status, createdAt",
+      cachedCustomers: "id, name, cachedAt",
+      cachedProducts: "id, name, cachedAt",
+      cachedTransactions: "id, created_at, cachedAt, client_id",
+    });
+    this.version(3).stores({
+      pendingTransactions: "clientId, status, createdAt",
+      cachedCustomers: "id, name, cachedAt",
+      cachedProducts: "id, name, cachedAt",
+      cachedTransactions: "id, created_at, cachedAt, client_id",
+      cachedWarehouses: "id, name, cachedAt",
+      cachedStocks: "id, warehouse_id, product_id, cachedAt",
+    });
+    this.version(4).stores({
+      pendingTransactions: "clientId, status, createdAt",
+      cachedCustomers: "id, name, cachedAt",
+      cachedProducts: "id, name, cachedAt",
+      cachedTransactions: "id, created_at, cachedAt, client_id",
+      cachedWarehouses: "id, name, cachedAt",
+      cachedStocks: "id, warehouse_id, product_id, cachedAt",
+      cachedDashboard: "period, cachedAt",
     });
   }
 }

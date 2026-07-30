@@ -1,26 +1,38 @@
-// Edge Function stub — deploy ke Supabase (bukan Cloudflare Workers Free).
-// Simpan SERVICE_ROLE hanya di secrets Supabase Functions.
+// Deploy: supabase functions deploy apply-sale-stock --project-ref <ref>
+// Secrets: SUPABASE_SERVICE_ROLE_KEY (URL/ANON otomatis di runtime)
 //
-// supabase functions deploy apply-sale-stock
-//
-// Body JSON: { productId, warehouseId, qty, transactionId }
+// Body apply: { productId, warehouseId, qty, transactionId }
+// Body restore: { action: "restore", transactionId }
 // Header: Authorization Bearer <user JWT>
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
+
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ message: "Method not allowed" }), {
-      status: 405,
-    });
+    return json({ message: "Method not allowed" }, 405);
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
-    return new Response(JSON.stringify({ message: "Unauthorized" }), {
-      status: 401,
-    });
+    return json({ message: "Unauthorized" }, 401);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -35,22 +47,59 @@ Deno.serve(async (req) => {
     error: userError,
   } = await userClient.auth.getUser();
   if (userError || !user) {
-    return new Response(JSON.stringify({ message: "Unauthorized" }), {
-      status: 401,
-    });
+    return json({ message: "Unauthorized" }, 401);
   }
 
-  const body = await req.json();
-  const { productId, warehouseId, qty, transactionId } = body ?? {};
-  if (!productId || !warehouseId || !qty || !transactionId) {
-    return new Response(JSON.stringify({ message: "Payload tidak lengkap" }), {
-      status: 400,
-    });
-  }
-
+  const body = await req.json().catch(() => ({}));
   const admin = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  if (body?.action === "restore") {
+    const transactionId = body.transactionId as string | undefined;
+    if (!transactionId) {
+      return json({ message: "transactionId wajib" }, 400);
+    }
+
+    const { data: sales, error: listErr } = await admin
+      .from("stock_movements")
+      .select("product_id, from_warehouse_id, qty")
+      .eq("reference_type", "transaction")
+      .eq("reference_id", transactionId)
+      .eq("type", "SALE");
+
+    if (listErr) {
+      return json({ message: listErr.message }, 400);
+    }
+
+    for (const m of sales || []) {
+      const { error } = await admin.rpc("apply_stock_change", {
+        p_type: "VOID_RESTORE",
+        p_product_id: m.product_id,
+        p_qty: m.qty,
+        p_from_warehouse_id: null,
+        p_to_warehouse_id: m.from_warehouse_id,
+        p_note: "Restore gagal simpan transaksi SPA",
+        p_reference_type: "transaction",
+        p_reference_id: transactionId,
+        p_created_by: user.id,
+      });
+      if (error) {
+        return json({ message: `Gagal restore stok: ${error.message}` }, 400);
+      }
+    }
+
+    return json({ success: true, restored: (sales || []).length });
+  }
+
+  const productId = body?.productId as string | undefined;
+  const warehouseId = body?.warehouseId as string | undefined;
+  const qty = Number(body?.qty);
+  const transactionId = body?.transactionId as string | undefined;
+
+  if (!productId || !warehouseId || !transactionId || !Number.isFinite(qty) || qty <= 0) {
+    return json({ message: "Payload tidak lengkap" }, 400);
+  }
 
   const { error } = await admin.rpc("apply_stock_change", {
     p_type: "SALE",
@@ -58,18 +107,15 @@ Deno.serve(async (req) => {
     p_from_warehouse_id: warehouseId,
     p_to_warehouse_id: null,
     p_qty: qty,
-    p_note: `sale:${transactionId}`,
-    p_created_by: user.id,
+    p_note: "Penjualan kasir",
+    p_reference_type: "transaction",
     p_reference_id: transactionId,
+    p_created_by: user.id,
   });
 
   if (error) {
-    return new Response(JSON.stringify({ message: error.message }), {
-      status: 400,
-    });
+    return json({ message: error.message }, 400);
   }
 
-  return new Response(JSON.stringify({ success: true }), {
-    headers: { "Content-Type": "application/json" },
-  });
+  return json({ success: true });
 });

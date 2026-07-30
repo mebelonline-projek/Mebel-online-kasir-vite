@@ -1,38 +1,42 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { getDashboardHref, useAuth } from "@/contexts/auth-context";
 import { supabase } from "@/lib/supabase";
 import { loginSchema } from "@/lib/validation";
-import { getDashboardHref, useAuth } from "@/contexts/auth-context";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 export function LoginPage() {
   const navigate = useNavigate();
   const { configured, refreshProfile } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const storeName = "Mebel Online Monitoring";
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     const parsed = loginSchema.safeParse({ email, password });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Validasi gagal");
+      setError(parsed.error.issues[0]?.message || "Validasi gagal");
       return;
     }
     if (!configured) {
-      toast.error("Supabase belum dikonfigurasi (.env.local)");
+      setError("Supabase belum dikonfigurasi (.env.local)");
       return;
     }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword(parsed.data);
-    if (error) {
+    const { error: authError } = await supabase.auth.signInWithPassword(
+      parsed.data
+    );
+    if (authError) {
       setLoading(false);
-      toast.error(error.message);
+      setError(authError.message);
       return;
     }
 
@@ -49,55 +53,66 @@ export function LoginPage() {
       : { data: null };
 
     setLoading(false);
-    toast.success("Berhasil masuk");
     navigate(getDashboardHref(profile?.role ?? null), { replace: true });
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Masuk</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Aplikasi monitoring toko (SPA beta)
-          </p>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="glass-panel w-full max-w-sm space-y-6 p-8">
+        <div className="space-y-3 text-center">
+          <div className="flex justify-center">
+            <StoreLogo alt={storeName} size="xl" className="shadow-lg" />
+          </div>
+          <h1 className="font-serif text-2xl font-bold text-primary dark:neon-title">
+            {storeName}
+          </h1>
+          <p className="text-sm text-muted-foreground">Masuk ke akun Anda</p>
+        </div>
+        <form className="space-y-4" onSubmit={(e) => void onSubmit(e)}>
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+              {error}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Memuat..." : "Masuk"}
-            </Button>
-          </form>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            Belum punya akun?{" "}
-            <Link className="underline" to="/register">
-              Daftar Owner
-            </Link>
-          </p>
-        </CardContent>
-      </Card>
+          )}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Email
+            </label>
+            <Input
+              type="email"
+              placeholder="contoh@email.com"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">
+              Password
+            </label>
+            <Input
+              type="password"
+              placeholder="........"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" disabled={loading} className="w-full">
+            {loading ? "Memproses..." : "Masuk"}
+          </Button>
+        </form>
+        <div className="space-y-2 text-center">
+          <Link
+            to="/register"
+            className="text-sm font-medium text-accent hover:underline"
+          >
+            Belum punya akun? Daftar
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

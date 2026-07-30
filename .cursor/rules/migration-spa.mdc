@@ -1,11 +1,11 @@
 ---
-description: Migrasi SPA kasir — keputusan final, status, UI wajib sama dengan Next
+description: Migrasi SPA kasir — keputusan final, antrian lanjut, UI wajib sama dengan Next
 alwaysApply: true
 ---
 
 # Migrasi SPA — aturan wajib
 
-Sebelum coding, baca `MIGRATION-HANDOFF.md`.
+Sebelum coding, baca `MIGRATION-HANDOFF.md` — terutama bagian **Lanjut besok**.
 
 ## Final decisions
 
@@ -18,14 +18,20 @@ Sebelum coding, baca `MIGRATION-HANDOFF.md`.
 
 **UI SPA harus sama persis dengan app Next** sebelum cutover.
 Sumber: folder sibling `Aplikasi monitoring` (`globals.css`, layout, transaksi, dashboard).
-UI minimal saat ini = sementara. Jangan anggap selesai tanpa parity visual.
+UI minimal = sementara. Jangan anggap selesai tanpa parity visual.
 
-## Next steps (default)
+## Antrian default jika user bilang “lanjut”
 
-1. Uji hosting (online/offline/sync).
-2. UI parity (port dari Next).
-3. Edge Functions stok/user + modul sisa.
-4. Cutover terakhir; Next = fallback (`v1-next-stable`).
+1. Void (+ restore stok via Edge `apply-sale-stock` action restore).
+2. Gudang → operasional → piutang → invoice → pengaturan.
+3. Nota/PDF, HPP; uji PWA jika diminta; cutover terakhir.
+
+Hosting online/offline sudah OK. Dashboard KPI OWNER sudah di-port. Edge `apply-sale-stock` sudah deploy + Build var Cloudflare OK. Jangan ulang uji hosting / fix cache Next kecuali diminta.
+
+## Preferensi sesi
+
+- Cepat + multi-device aman (Dexie + Realtime + SW NetworkOnly).
+- PowerShell: `;` bukan `&&`.
 
 ## Deploy pitfalls
 

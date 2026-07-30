@@ -1,6 +1,10 @@
 import type { ActionState } from "@/types/common";
 import type { TransactionCreateValues } from "@/lib/validation";
-import { transactionCreateSchema } from "@/lib/validation";
+import {
+  paymentSchema,
+  transactionCreateSchema,
+  type PaymentFormValues,
+} from "@/lib/validation";
 import { supabase } from "@/lib/supabase";
 import { toRupiahInteger } from "@/lib/money";
 
@@ -13,8 +17,42 @@ export interface TransactionRow {
   payment_type: "CASH" | "DP";
   dp_amount: number;
   status: string;
+  fulfillment_status?: string | null;
   created_at: string;
   client_id?: string | null;
+}
+
+export interface TransactionPaymentRow {
+  id: string;
+  amount: number;
+  payment_date: string;
+  method: string;
+  note: string | null;
+}
+
+export interface TransactionItemDetail {
+  id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+  note: string | null;
+  sort_order: number;
+}
+
+export interface TransactionDetail {
+  id: string;
+  transaction_number: string;
+  customer_name: string | null;
+  description: string | null;
+  final_price: number;
+  payment_type: "CASH" | "DP";
+  dp_amount: number;
+  status: string;
+  fulfillment_status: string | null;
+  created_at: string;
+  transaction_items: TransactionItemDetail[];
+  transaction_payments: TransactionPaymentRow[];
 }
 
 /**
@@ -170,22 +208,35 @@ export async function createTransaction(
         };
       }
 
-      // Potong stok via Edge Function jika dikonfigurasi (Fase 3)
-      const stockUrl = import.meta.env.VITE_EDGE_APPLY_SALE_STOCK_URL as
-        | string
-        | undefined;
+      // Potong stok via Edge Function jika dikonfigurasi
+      const stockUrl = (
+        import.meta.env.VITE_EDGE_APPLY_SALE_STOCK_URL as string | undefined
+      )?.trim();
       if (stockUrl) {
         const {
           data: { session },
         } = await supabase.auth.getSession();
+        const authHeaders = {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        };
+
+        const rollbackStock = async () => {
+          await fetch(stockUrl, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({
+              action: "restore",
+              transactionId: transaction.id,
+            }),
+          }).catch(() => undefined);
+        };
+
         for (const row of rows) {
           if (!row.product_id || !row.warehouse_id) continue;
           const res = await fetch(stockUrl, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session?.access_token ?? ""}`,
-            },
+            headers: authHeaders,
             body: JSON.stringify({
               productId: row.product_id,
               warehouseId: row.warehouse_id,
@@ -197,6 +248,7 @@ export async function createTransaction(
             const body = (await res.json().catch(() => ({}))) as {
               message?: string;
             };
+            await rollbackStock();
             await supabase.from("transactions").delete().eq("id", transaction.id);
             return {
               success: false,
@@ -254,7 +306,7 @@ export async function listRecentTransactions(
     const { data, error } = await supabase
       .from("transactions")
       .select(
-        "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, created_at, client_id"
+        "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, fulfillment_status, created_at, client_id"
       )
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -268,6 +320,186 @@ export async function listRecentTransactions(
     return {
       success: false,
       message: error instanceof Error ? error.message : "Gagal memuat transaksi",
+    };
+  }
+}
+
+export async function getTransactionById(
+  id: string
+): Promise<ActionState<TransactionDetail>> {
+  try {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select(
+        `
+        id, transaction_number, customer_name, description, final_price,
+        payment_type, dp_amount, status, fulfillment_status, created_at,
+        transaction_items ( id, product_name, quantity, unit_price, line_total, note, sort_order ),
+        transaction_payments ( id, amount, payment_date, method, note )
+      `
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) return { success: false, message: error.message };
+    if (!data) return { success: false, message: "Transaksi tidak ditemukan" };
+
+    const items = (
+      (data.transaction_items as TransactionItemDetail[] | null) || []
+    )
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+    const payments = (
+      (data.transaction_payments as TransactionPaymentRow[] | null) || []
+    )
+      .slice()
+      .sort((a, b) =>
+        a.payment_date < b.payment_date
+          ? -1
+          : a.payment_date > b.payment_date
+            ? 1
+            : 0
+      );
+
+    return {
+      success: true,
+      data: {
+        id: data.id,
+        transaction_number: data.transaction_number,
+        customer_name: data.customer_name,
+        description: data.description,
+        final_price: Number(data.final_price),
+        payment_type: data.payment_type,
+        dp_amount: Number(data.dp_amount),
+        status: data.status,
+        fulfillment_status: data.fulfillment_status,
+        created_at: data.created_at,
+        transaction_items: items.map((i) => ({
+          ...i,
+          quantity: Number(i.quantity),
+          unit_price: Number(i.unit_price),
+          line_total: Number(i.line_total),
+        })),
+        transaction_payments: payments.map((p) => ({
+          ...p,
+          amount: Number(p.amount),
+        })),
+      },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Gagal memuat detail transaksi",
+    };
+  }
+}
+
+export async function addPayment(
+  formData: PaymentFormValues
+): Promise<ActionState<{ id: string }>> {
+  try {
+    const parsed = paymentSchema.safeParse(formData);
+    if (!parsed.success) {
+      return {
+        success: false,
+        message: parsed.error.issues[0]?.message || "Validasi gagal",
+      };
+    }
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+    if (userError || !user) {
+      return { success: false, message: "Anda harus login" };
+    }
+
+    const transactionId = parsed.data.transaction_id;
+    const { data: tx, error: txError } = await supabase
+      .from("transactions")
+      .select("id, status, final_price, payment_type, transaction_number")
+      .eq("id", transactionId)
+      .maybeSingle();
+
+    if (txError) return { success: false, message: txError.message };
+    if (!tx) return { success: false, message: "Transaksi tidak ditemukan" };
+    if (tx.status === "LUNAS") {
+      return {
+        success: false,
+        message: "Transaksi sudah lunas, tidak perlu pelunasan",
+      };
+    }
+    if (tx.status === "BATAL") {
+      return { success: false, message: "Transaksi sudah dibatalkan" };
+    }
+
+    const { data: existingPayments } = await supabase
+      .from("transaction_payments")
+      .select("amount")
+      .eq("transaction_id", transactionId);
+
+    const totalPaidBefore = (existingPayments || []).reduce(
+      (sum, p) => sum + Number(p.amount),
+      0
+    );
+    const remainingBefore = Number(tx.final_price) - totalPaidBefore;
+    const amount = toRupiahInteger(parsed.data.amount);
+
+    if (amount > remainingBefore) {
+      return {
+        success: false,
+        message: `Jumlah pembayaran melebihi sisa tagihan (Rp ${remainingBefore.toLocaleString("id-ID")})`,
+      };
+    }
+
+    const { data: payment, error: payError } = await supabase
+      .from("transaction_payments")
+      .insert({
+        transaction_id: transactionId,
+        amount,
+        method: parsed.data.method,
+        note: parsed.data.note || null,
+        created_by: user.id,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (payError) return { success: false, message: payError.message };
+    if (!payment) {
+      return { success: false, message: "Gagal menambahkan pembayaran" };
+    }
+
+    const totalPaidAfter = totalPaidBefore + amount;
+    const remainingAfter = Number(tx.final_price) - totalPaidAfter;
+
+    let newStatus = tx.status as string;
+    if (remainingAfter <= 0) newStatus = "LUNAS";
+    else if (tx.status === "DP" && totalPaidAfter > 0) {
+      newStatus = "MENUNGGU_PELUNASAN";
+    }
+
+    if (newStatus !== tx.status) {
+      await supabase
+        .from("transactions")
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq("id", transactionId);
+    }
+
+    const statusMsg = newStatus === "LUNAS" ? " — LUNAS" : "";
+    return {
+      success: true,
+      message: `Pembayaran Rp ${amount.toLocaleString("id-ID")} berhasil dicatat${statusMsg}`,
+      data: { id: payment.id },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "Terjadi kesalahan saat menambah pembayaran",
     };
   }
 }

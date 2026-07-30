@@ -26,3 +26,9 @@ dist-ssr
 # Cloudflare / Wrangler
 .wrangler
 .dev.vars
+
+# Supabase CLI
+supabase/.temp
+
+# Playwright MCP artifacts
+.playwright-mcp
