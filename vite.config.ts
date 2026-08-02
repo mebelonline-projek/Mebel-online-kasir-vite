@@ -4,27 +4,72 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+/** Parity Next: maroon brand + cream dari logo aplikasi */
+const THEME_COLOR = "#7A1F1F";
+const BACKGROUND_COLOR = "#F7F1E8";
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      includeAssets: [
+        "favicon-32.png",
+        "logo.png",
+        "icons/icon-48.png",
+        "icons/icon-192.png",
+        "icons/icon-512.png",
+        "icons/apple-touch-icon.png",
+      ],
       manifest: {
-        name: "Mebel Monitor SPA",
-        short_name: "MebelSPA",
-        description: "Monitoring toko furnitur — offline-capable kasir",
-        theme_color: "#78716C",
-        background_color: "#FAF5F2",
+        name: "Mebel Online Monitoring",
+        short_name: "MebelMonitor",
+        description:
+          "Aplikasi manajemen keuangan toko furnitur — kelola transaksi, HPP, biaya operasional, dan pantau omzet",
+        theme_color: THEME_COLOR,
+        background_color: BACKGROUND_COLOR,
         display: "standalone",
         start_url: "/kasir",
+        orientation: "any",
         icons: [
           {
-            src: "/favicon.svg",
-            sizes: "any",
-            type: "image/svg+xml",
-            purpose: "any maskable",
+            src: "/icons/icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/icons/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any",
+          },
+          {
+            src: "/icons/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+          {
+            src: "/icons/apple-touch-icon.png",
+            sizes: "180x180",
+            type: "image/png",
+            purpose: "any",
+          },
+        ],
+        shortcuts: [
+          {
+            name: "Transaksi Baru",
+            short_name: "Baru",
+            url: "/kasir",
+            icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
+          },
+          {
+            name: "Daftar Transaksi",
+            short_name: "Transaksi",
+            url: "/transaksi",
+            icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }],
           },
         ],
       },
