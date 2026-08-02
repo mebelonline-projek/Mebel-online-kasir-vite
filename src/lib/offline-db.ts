@@ -23,6 +23,10 @@ export interface CachedProduct {
   category: string;
   base_price: number;
   unit: string;
+  parent_id: string | null;
+  warna: string | null;
+  ukuran: string | null;
+  min_stock: number;
   cachedAt: number;
 }
 

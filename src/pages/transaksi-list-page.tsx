@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import {
+  Link,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
 import { toast } from "sonner";
 import {
   CheckCircle,
   Clock,
+  Download,
+  Eye,
   Plus,
   Receipt,
   Search,
   XCircle,
 } from "lucide-react";
+import { FulfillmentBadge } from "@/components/shared/fulfillment-badge";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { PageListSkeleton } from "@/components/shared/page-skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,7 +29,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { FULFILLMENT_STATUSES } from "@/config/fulfillment";
+import { useAuth } from "@/contexts/auth-context";
 import { useLiveData } from "@/hooks/use-live-data";
+import { downloadCsv } from "@/lib/export-csv";
 import type { CachedTransactionRow } from "@/lib/offline-db";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import {
@@ -44,6 +55,7 @@ function rowsEqual(a: CachedTransactionRow[], b: CachedTransactionRow[]) {
     if (
       a[i].id !== b[i].id ||
       a[i].status !== b[i].status ||
+      a[i].fulfillment_status !== b[i].fulfillment_status ||
       a[i].final_price !== b[i].final_price ||
       a[i].offlinePending !== b[i].offlinePending
     ) {
@@ -62,17 +74,41 @@ function displayStatus(row: CachedTransactionRow) {
 
 export function TransaksiListPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { role } = useAuth();
+  const isOwner = role === "OWNER";
+
   const { data: rows, loading, refreshing, error } = useLiveData({
     getCached: getCachedTransactionList,
     fetcher: () => loadTransactionListLive(50),
     isEqual: rowsEqual,
   });
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusValue, setStatusValue] = useState("semua");
+
+  const [searchQuery, setSearchQuery] = useState(
+    () => searchParams.get("q") || ""
+  );
+  const [statusValue, setStatusValue] = useState(
+    () => searchParams.get("status") || "semua"
+  );
+  const [fulfillmentValue, setFulfillmentValue] = useState(
+    () => searchParams.get("fulfillment") || "semua"
+  );
 
   useEffect(() => {
     if (error) toast.error(error);
   }, [error]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (searchQuery.trim()) next.set("q", searchQuery.trim());
+    if (statusValue !== "semua") next.set("status", statusValue);
+    if (fulfillmentValue !== "semua") next.set("fulfillment", fulfillmentValue);
+    const nextStr = next.toString();
+    const curStr = searchParams.toString();
+    if (nextStr !== curStr) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchQuery, statusValue, fulfillmentValue, searchParams, setSearchParams]);
 
   const list = rows ?? [];
 
@@ -87,6 +123,11 @@ export function TransaksiListPage() {
           return false;
         }
       }
+      if (fulfillmentValue !== "semua") {
+        if (status === "BATAL") return false;
+        const f = row.fulfillment_status || "MENUNGGU";
+        if (f !== fulfillmentValue) return false;
+      }
       if (!q) return true;
       const hay = [
         row.transaction_number,
@@ -97,7 +138,7 @@ export function TransaksiListPage() {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [list, searchQuery, statusValue]);
+  }, [list, searchQuery, statusValue, fulfillmentValue]);
 
   const stats = useMemo(() => {
     let lunas = 0;
@@ -112,7 +153,34 @@ export function TransaksiListPage() {
     return { total: list.length, lunas, menunggu, batal };
   }, [list]);
 
-  const isFiltered = Boolean(searchQuery) || statusValue !== "semua";
+  const isFiltered =
+    Boolean(searchQuery) ||
+    statusValue !== "semua" ||
+    fulfillmentValue !== "semua";
+
+  function handleExportCsv() {
+    downloadCsv(`transaksi-${new Date().toISOString().slice(0, 10)}.csv`, [
+      [
+        "No Transaksi",
+        "Pelanggan",
+        "Deskripsi",
+        "Harga",
+        "Bayar",
+        "Pesanan",
+        "Tanggal",
+      ],
+      ...filtered.map((tx) => [
+        tx.transaction_number,
+        tx.customer_name || "",
+        tx.description || "",
+        tx.final_price.toString(),
+        displayStatus(tx),
+        tx.fulfillment_status || "MENUNGGU",
+        tx.created_at,
+      ]),
+    ]);
+    toast.success("CSV berhasil diunduh");
+  }
 
   const statCards = [
     {
@@ -153,12 +221,25 @@ export function TransaksiListPage() {
             {refreshing ? " · Memperbarui…" : ""}
           </p>
         </div>
-        <Link to="/kasir">
-          <Button type="button" className="min-h-[44px] gap-2">
-            <Plus className="h-4 w-4" />
-            Transaksi Baru
-          </Button>
-        </Link>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          {isOwner && filtered.length > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-[44px] gap-2"
+              onClick={handleExportCsv}
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </Button>
+          )}
+          <Link to="/kasir">
+            <Button type="button" className="min-h-[44px] w-full gap-2 sm:w-auto">
+              <Plus className="h-4 w-4" />
+              Transaksi Baru
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row">
@@ -175,11 +256,20 @@ export function TransaksiListPage() {
               className="pl-9"
             />
           </div>
-          {searchQuery && (
+          <Button type="submit" variant="secondary">
+            Cari
+          </Button>
+          {(searchQuery ||
+            statusValue !== "semua" ||
+            fulfillmentValue !== "semua") && (
             <Button
               type="button"
               variant="outline"
-              onClick={() => setSearchQuery("")}
+              onClick={() => {
+                setSearchQuery("");
+                setStatusValue("semua");
+                setFulfillmentValue("semua");
+              }}
             >
               Reset
             </Button>
@@ -193,6 +283,34 @@ export function TransaksiListPage() {
               variant={statusValue === opt.value ? "default" : "outline"}
               size="xs"
               onClick={() => setStatusValue(opt.value)}
+              className="rounded-full text-xs"
+            >
+              {opt.label}
+            </Button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="mr-1 self-center text-xs text-muted-foreground">
+            Pesanan:
+          </span>
+          <Button
+            type="button"
+            variant={fulfillmentValue === "semua" ? "default" : "outline"}
+            size="xs"
+            onClick={() => setFulfillmentValue("semua")}
+            className="rounded-full text-xs"
+          >
+            Semua
+          </Button>
+          {FULFILLMENT_STATUSES.map((opt) => (
+            <Button
+              key={opt.value}
+              type="button"
+              variant={
+                fulfillmentValue === opt.value ? "default" : "outline"
+              }
+              size="xs"
+              onClick={() => setFulfillmentValue(opt.value)}
               className="rounded-full text-xs"
             >
               {opt.label}
@@ -225,7 +343,7 @@ export function TransaksiListPage() {
       </div>
 
       {loading && list.length === 0 ? (
-        <p className="text-muted-foreground">Memuat...</p>
+        <PageListSkeleton />
       ) : filtered.length === 0 ? (
         <Card className="shadow-sm">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
@@ -256,7 +374,8 @@ export function TransaksiListPage() {
         <>
           <div className="space-y-3 md:hidden">
             {filtered.map((tx) => {
-              const canOpen = !tx.offlinePending && !tx.id.startsWith("offline:");
+              const canOpen =
+                !tx.offlinePending && !tx.id.startsWith("offline:");
               const card = (
                 <Card
                   className={`shadow-sm ${canOpen ? "transition-colors hover:bg-accent/30" : ""}`}
@@ -268,6 +387,11 @@ export function TransaksiListPage() {
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         <StatusBadge status={displayStatus(tx)} />
+                        {displayStatus(tx) !== "BATAL" && (
+                          <FulfillmentBadge
+                            status={tx.fulfillment_status || "MENUNGGU"}
+                          />
+                        )}
                         {tx.offlinePending && tx.status !== "GAGAL" && (
                           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-700 uppercase dark:text-amber-400">
                             Offline
@@ -314,7 +438,9 @@ export function TransaksiListPage() {
                     <TableHead>Produk</TableHead>
                     <TableHead>Total</TableHead>
                     <TableHead>Status Bayar</TableHead>
+                    <TableHead>Pesanan</TableHead>
                     <TableHead>Tanggal</TableHead>
+                    <TableHead className="w-[60px]">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -324,7 +450,11 @@ export function TransaksiListPage() {
                     return (
                       <TableRow
                         key={tx.id}
-                        className={canOpen ? "cursor-pointer hover:bg-accent/40" : undefined}
+                        className={
+                          canOpen
+                            ? "cursor-pointer hover:bg-accent/40"
+                            : undefined
+                        }
                         onClick={() => {
                           if (canOpen) navigate(`/transaksi/${tx.id}`);
                         }}
@@ -359,8 +489,34 @@ export function TransaksiListPage() {
                         <TableCell>
                           <StatusBadge status={displayStatus(tx)} />
                         </TableCell>
+                        <TableCell>
+                          {displayStatus(tx) !== "BATAL" ? (
+                            <FulfillmentBadge
+                              status={tx.fulfillment_status || "MENUNGGU"}
+                            />
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {formatDate(tx.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          {canOpen && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/transaksi/${tx.id}`);
+                              }}
+                              aria-label="Lihat detail"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     );

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  isWibDateInAllowedRange,
+  TRANSACTION_DATE_MAX_LOOKBACK_DAYS,
+} from "@/lib/date-utils";
 
 const DB_UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -62,6 +66,59 @@ export const transactionCreateSchema = z
     client_id: dbId().optional(),
     dp_amount: z.coerce.number().min(0, "DP tidak boleh negatif").default(0),
     items: z.array(transactionItemSchema).optional(),
+    /** Tanggal bisnis (YYYY-MM-DD). Kosong = hari ini WIB. Hanya untuk create. */
+    transaction_date: z.union([z.iso.date(), z.literal("")]).optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.payment_type === "DP") {
+        return data.dp_amount > 0 && data.dp_amount < data.final_price;
+      }
+      return true;
+    },
+    {
+      message: "DP harus lebih dari 0 dan kurang dari harga final",
+      path: ["dp_amount"],
+    }
+  )
+  .superRefine((data, ctx) => {
+    const dateStr = data.transaction_date;
+    if (!dateStr) return;
+    if (!isWibDateInAllowedRange(dateStr, TRANSACTION_DATE_MAX_LOOKBACK_DAYS)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Tanggal harus hari ini atau maksimal ${TRANSACTION_DATE_MAX_LOOKBACK_DAYS} hari ke belakang`,
+        path: ["transaction_date"],
+      });
+    }
+  });
+
+export type TransactionCreateValues = z.infer<typeof transactionCreateSchema>;
+
+/** Edit transaksi (DP-only) — tanpa line items / tanggal custom. */
+export const transactionSchema = z
+  .object({
+    customer_id: optionalDbId(),
+    product_id: optionalDbId(),
+    customer_name: z
+      .string()
+      .max(100, "Nama pelanggan maksimal 100 karakter")
+      .optional()
+      .or(z.literal(""))
+      .nullable(),
+    description: z
+      .string()
+      .max(1000, "Deskripsi maksimal 1000 karakter")
+      .optional()
+      .or(z.literal(""))
+      .nullable(),
+    final_price: z.coerce
+      .number()
+      .min(1, "Harga harus lebih dari 0")
+      .max(999_999_999, "Harga terlalu besar"),
+    payment_type: z.enum(["CASH", "DP"], { error: "Pilih tipe pembayaran" }),
+    payment_method: z.enum(["TUNAI", "TRANSFER"]).default("TUNAI"),
+    dp_amount: z.coerce.number().min(0, "DP tidak boleh negatif").default(0),
   })
   .refine(
     (data) => {
@@ -76,7 +133,14 @@ export const transactionCreateSchema = z
     }
   );
 
-export type TransactionCreateValues = z.infer<typeof transactionCreateSchema>;
+export type TransactionFormValues = z.infer<typeof transactionSchema>;
+
+export const fulfillmentUpdateSchema = z.object({
+  id: dbId(),
+  fulfillment_status: z.enum(["MENUNGGU", "PRODUKSI", "SIAP_KIRIM", "SELESAI"]),
+});
+
+export type FulfillmentUpdateValues = z.infer<typeof fulfillmentUpdateSchema>;
 
 export const paymentSchema = z.object({
   transaction_id: z.string().min(1, "ID transaksi wajib"),
@@ -130,3 +194,40 @@ export const categorySchema = z.object({
 });
 
 export type CategoryFormValues = z.infer<typeof categorySchema>;
+
+export const operationalCostSchema = z.object({
+  name: z
+    .string()
+    .min(2, "Nama biaya minimal 2 karakter")
+    .max(200, "Nama biaya maksimal 200 karakter"),
+  amount: z.coerce
+    .number()
+    .min(1, "Jumlah harus lebih dari 0")
+    .max(999_999_999, "Jumlah terlalu besar"),
+  category: z
+    .string()
+    .max(100, "Kategori maksimal 100 karakter")
+    .optional()
+    .default("LAINNYA"),
+});
+
+export type OperationalCostFormValues = z.infer<typeof operationalCostSchema>;
+
+export const hppItemSchema = z.object({
+  transaction_id: z.string().min(1, "ID transaksi wajib"),
+  name: z
+    .string()
+    .min(2, "Nama item minimal 2 karakter")
+    .max(200, "Nama item maksimal 200 karakter"),
+  amount: z.coerce
+    .number()
+    .min(1, "Jumlah harus lebih dari 0")
+    .max(999_999_999, "Jumlah terlalu besar"),
+  note: z
+    .string()
+    .max(500, "Catatan maksimal 500 karakter")
+    .optional()
+    .or(z.literal("")),
+});
+
+export type HppItemFormValues = z.infer<typeof hppItemSchema>;

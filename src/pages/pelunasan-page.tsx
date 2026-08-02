@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
+import { PageListSkeleton } from "@/components/shared/page-skeleton";
 import { emitDataChanged } from "@/lib/data-events";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { addPayment, getTransactionById } from "@/lib/transactions";
@@ -99,7 +100,11 @@ export function PelunasanPage() {
   }
 
   if (loading) {
-    return <p className="text-muted-foreground">Memuat...</p>;
+    return (
+      <div className="mx-auto max-w-xl">
+        <PageListSkeleton rows={3} />
+      </div>
+    );
   }
 
   return (

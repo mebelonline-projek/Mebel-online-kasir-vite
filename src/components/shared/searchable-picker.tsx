@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { NO_SEARCH_MATCH, productSearchScore } from "@/lib/inventory-helpers";
 
 export interface PickerOption {
   id: string;
   label: string;
   sublabel?: string;
+  /** Nama produk utama — dipakai untuk ranking pencarian */
+  searchName?: string;
+  searchWarna?: string | null;
+  searchUkuran?: string | null;
+  searchCategory?: string;
 }
 
 interface Props {
@@ -38,13 +44,45 @@ export function SearchablePicker({
 
   const selected = options.find((o) => o.id === value) || null;
 
-  const filtered = options.filter((o) => {
-    const q = query.toLowerCase();
-    return (
-      o.label.toLowerCase().includes(q) ||
-      (o.sublabel?.toLowerCase().includes(q) ?? false)
-    );
-  });
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    if (!q) return options;
+
+    return options
+      .map((o) => {
+        const hasRankFields =
+          o.searchName != null ||
+          o.searchWarna != null ||
+          o.searchUkuran != null ||
+          o.searchCategory != null;
+
+        const score = hasRankFields
+          ? productSearchScore(
+              {
+                name: o.searchName || o.label,
+                warna: o.searchWarna,
+                ukuran: o.searchUkuran,
+                category: o.searchCategory || "",
+              },
+              q
+            )
+          : productSearchScore(
+              {
+                name: o.label,
+                category: o.sublabel || "",
+              },
+              q
+            );
+
+        return { o, score };
+      })
+      .filter((x) => x.score !== NO_SEARCH_MATCH)
+      .sort((a, b) => {
+        if (a.score !== b.score) return a.score - b.score;
+        return a.o.label.localeCompare(b.o.label, "id");
+      })
+      .map((x) => x.o);
+  }, [options, query]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

@@ -12,6 +12,9 @@ import {
   Users,
   Package,
   Warehouse,
+  Tags,
+  Boxes,
+  ArrowLeftRight,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -46,6 +49,30 @@ export function AppSidebar() {
       icon: Warehouse,
       inventoryOnly: true,
     },
+    {
+      label: "Kategori",
+      href: "/gudang/kategori",
+      icon: Tags,
+      gudangOnly: true,
+    },
+    {
+      label: "Barang",
+      href: "/gudang/barang",
+      icon: Package,
+      gudangOnly: true,
+    },
+    {
+      label: "Stok",
+      href: "/gudang/stok",
+      icon: Boxes,
+      gudangOnly: true,
+    },
+    {
+      label: "Mutasi",
+      href: "/gudang/mutasi",
+      icon: ArrowLeftRight,
+      gudangOnly: true,
+    },
     { label: "Piutang", href: "/piutang", icon: Wallet, ownerOnly: true },
     { label: "Invoice", href: "/invoice", icon: FileText, hideForGudang: true },
     { label: "Biaya", href: "/operasional", icon: Wrench, hideForGudang: true },
@@ -62,7 +89,7 @@ export function AppSidebar() {
 
   return (
     <aside className="fixed top-0 left-0 z-50 hidden h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar py-6 lg:flex">
-      <div className="mb-10 flex flex-col items-center px-6 text-center">
+      <div className="mb-10 flex shrink-0 flex-col items-center px-6 text-center">
         <StoreLogo src={store.logo_url} alt={brandName} size="md" className="mb-3" />
         <h1
           className="text-xl font-bold tracking-tight"
@@ -78,7 +105,7 @@ export function AppSidebar() {
         </p>
       </div>
 
-      <nav className="flex-grow space-y-1">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           const Icon = item.icon;
@@ -99,7 +126,7 @@ export function AppSidebar() {
         })}
       </nav>
 
-      <div className="px-6 py-3">
+      <div className="shrink-0 px-6 py-3">
         {mounted && (
           <Button
             variant="ghost"
@@ -122,7 +149,7 @@ export function AppSidebar() {
         )}
       </div>
 
-      <div className="mt-auto flex flex-col gap-3 border-t border-sidebar-border/50 px-6 pt-6">
+      <div className="mt-auto flex shrink-0 flex-col gap-3 border-t border-sidebar-border/50 px-6 pt-6">
         <div className="flex items-center gap-3">
           <StoreLogo src={store.logo_url} alt={brandName} size="sm" />
           <div className="min-w-0">

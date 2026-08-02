@@ -19,11 +19,13 @@ const RADIUS_CLASS = {
 } as const;
 
 type StoreLogoSize = keyof typeof SIZE_CLASS;
+type StoreLogoVariant = "app" | "print";
 
 interface StoreLogoProps {
   src?: string | null;
   alt?: string;
   size?: StoreLogoSize;
+  variant?: StoreLogoVariant;
   className?: string;
 }
 
@@ -31,6 +33,7 @@ export function StoreLogo({
   src,
   alt = "Logo toko",
   size = "md",
+  variant = "app",
   className,
 }: StoreLogoProps) {
   const [imgSrc, setImgSrc] = useState(() => resolveStoreLogoUrl(src));
@@ -45,9 +48,12 @@ export function StoreLogo({
   const isBrandDefault =
     resolved === DEFAULT_LOGO || resolved.startsWith("/logo.");
 
-  const frameClass = isBrandDefault
-    ? "shadow-md ring-1 ring-primary/20 dark:ring-primary/30"
-    : "border-2 border-primary/25 bg-gradient-to-br from-background via-muted/30 to-primary/5 shadow-md ring-1 ring-primary/10 dark:from-sidebar-accent/20 dark:to-primary/10";
+  const frameClass =
+    variant === "print"
+      ? "border border-gray-200 bg-white shadow-sm"
+      : isBrandDefault
+        ? "shadow-md ring-1 ring-primary/20 dark:ring-primary/30"
+        : "border-2 border-primary/25 bg-gradient-to-br from-background via-muted/30 to-primary/5 shadow-md ring-1 ring-primary/10 dark:from-sidebar-accent/20 dark:to-primary/10";
 
   return (
     <div
@@ -62,7 +68,10 @@ export function StoreLogo({
       <img
         src={resolved}
         alt={alt}
-        className="h-full w-full object-cover"
+        className={cn(
+          "h-full w-full object-cover",
+          !isBrandDefault && variant === "print" && "object-contain p-1"
+        )}
         onError={() => {
           if (!failed) {
             setFailed(true);

@@ -22,6 +22,11 @@ import {
 import { emitDataChanged } from "@/lib/data-events";
 import { formatCurrency } from "@/lib/formatters";
 import { parseRupiahInteger } from "@/lib/money";
+import {
+  getTransactionDateBounds,
+  wibNoonISO,
+} from "@/lib/date-utils";
+import { Input } from "@/components/ui/input";
 import type {
   CachedCustomer,
   CachedProduct,
@@ -34,6 +39,7 @@ import { createTransaction } from "@/lib/transactions";
 export function KasirPage() {
   const navigate = useNavigate();
   const formRef = useRef<HTMLFormElement>(null);
+  const dateBounds = useMemo(() => getTransactionDateBounds(), []);
 
   const [customers, setCustomers] = useState<CachedCustomer[]>([]);
   const [products, setProducts] = useState<CachedProduct[]>([]);
@@ -48,6 +54,7 @@ export function KasirPage() {
     "TUNAI"
   );
   const [dpAmount, setDpAmount] = useState("");
+  const [transactionDate, setTransactionDate] = useState(dateBounds.today);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -86,6 +93,7 @@ export function KasirPage() {
   const dpAmountNum = Number(dpAmount) || 0;
   const remaining = Math.max(0, finalPriceNum - dpAmountNum);
   const isDp = paymentType === "DP";
+  const isBackdated = transactionDate < dateBounds.today;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -126,6 +134,7 @@ export function KasirPage() {
       payment_type: paymentType,
       payment_method: paymentMethod,
       dp_amount: dp,
+      transaction_date: transactionDate,
       items: validItems.map((i) => ({
         product_id: i.product_id || "",
         product_name: i.product_name.trim(),
@@ -161,8 +170,21 @@ export function KasirPage() {
     }
     emitDataChanged("create");
     void refreshCatalogCache();
-    toast.success(result.message || "Berhasil");
-    navigate("/transaksi");
+
+    const txId = result.data?.id;
+    if (txId) {
+      toast.success(result.message || "Berhasil", {
+        action: {
+          label: "Cetak Nota",
+          onClick: () => navigate(`/transaksi/${txId}/nota`),
+        },
+        duration: 8000,
+      });
+      navigate(`/transaksi/${txId}`);
+    } else {
+      toast.success(result.message || "Berhasil");
+      navigate("/transaksi");
+    }
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -179,9 +201,9 @@ export function KasirPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Kasir</h1>
+        <h1 className="text-2xl font-bold sm:text-3xl">Kasir</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Input cepat penjualan. Bisa offline — sync otomatis saat online.
+          Input cepat transaksi — Ctrl+Enter untuk simpan
           {!import.meta.env.VITE_EDGE_APPLY_SALE_STOCK_URL && (
             <span className="block text-amber-700 dark:text-amber-400">
               Potong stok belum aktif (set VITE_EDGE_APPLY_SALE_STOCK_URL setelah
@@ -252,6 +274,36 @@ export function KasirPage() {
                   }}
                   manualPlaceholder="Atau ketik nama pelanggan..."
                 />
+
+                <div className="space-y-1.5">
+                  <label htmlFor="transaction_date" className="text-sm font-medium">
+                    Tanggal transaksi
+                  </label>
+                  <Input
+                    id="transaction_date"
+                    type="date"
+                    value={transactionDate}
+                    min={dateBounds.min}
+                    max={dateBounds.today}
+                    onChange={(e) => setTransactionDate(e.target.value)}
+                    className="h-12"
+                  />
+                  {isBackdated && (
+                    <p className="text-xs text-muted-foreground">
+                      Mundur ke{" "}
+                      {new Date(wibNoonISO(transactionDate)).toLocaleDateString(
+                        "id-ID",
+                        {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric",
+                          timeZone: "Asia/Jakarta",
+                        }
+                      )}
+                      . Nomor TRX tetap mengikuti hari input.
+                    </p>
+                  )}
+                </div>
 
                 <LineItemsEditor
                   items={lineItems}

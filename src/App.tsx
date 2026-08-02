@@ -5,15 +5,28 @@ import { AuthProvider, useAuth } from "@/contexts/auth-context";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { AppShell } from "@/components/layout/app-shell";
 import { LoginPage } from "@/pages/login-page";
-import { RegisterPage } from "@/pages/register-page";
 import { KasirPage } from "@/pages/kasir-page";
 import { TransaksiListPage } from "@/pages/transaksi-list-page";
 import { TransaksiDetailPage } from "@/pages/transaksi-detail-page";
+import { TransaksiEditPage } from "@/pages/transaksi-edit-page";
 import { PelunasanPage } from "@/pages/pelunasan-page";
+import { NotaPage } from "@/pages/nota-page";
+import { TransaksiHppPage } from "@/pages/transaksi-hpp-page";
 import { DashboardPage } from "@/pages/dashboard-page";
-import { PlaceholderPage } from "@/pages/placeholder-page";
 import { CustomersPage } from "@/pages/customers-page";
-import { ProductsPage } from "@/pages/products-page";
+import { OperasionalPage } from "@/pages/operasional-page";
+import { PiutangPage } from "@/pages/piutang-page";
+import { InvoiceListPage } from "@/pages/invoice-list-page";
+import { InvoiceBuatPage } from "@/pages/invoice-buat-page";
+import { InvoiceDetailPage } from "@/pages/invoice-detail-page";
+import { GudangLayout } from "@/pages/gudang-layout";
+import { GudangLokasiPage } from "@/pages/gudang-lokasi-page";
+import { GudangKategoriPage } from "@/pages/gudang-kategori-page";
+import { GudangBarangPage } from "@/pages/gudang-barang-page";
+import { GudangStokPage } from "@/pages/gudang-stok-page";
+import { GudangMutasiPage } from "@/pages/gudang-mutasi-page";
+import { PengaturanPage } from "@/pages/pengaturan-page";
+import { PengaturanUserPage } from "@/pages/pengaturan-user-page";
 import { setupOfflineSyncListeners } from "@/lib/offline-sync";
 import { refreshCatalogCache } from "@/lib/catalog-cache";
 
@@ -46,7 +59,7 @@ export default function App() {
         <OfflineBootstrap />
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/register" element={<Navigate to="/login" replace />} />
 
           <Route element={<ProtectedRoute />}>
             <Route element={<AppShell />}>
@@ -56,31 +69,34 @@ export default function App() {
               <Route path="/transaksi" element={<TransaksiListPage />} />
               <Route path="/transaksi/:id" element={<TransaksiDetailPage />} />
               <Route
+                path="/transaksi/:id/edit"
+                element={<TransaksiEditPage />}
+              />
+              <Route
                 path="/transaksi/:id/pelunasan"
                 element={<PelunasanPage />}
               />
+              <Route path="/transaksi/:id/nota" element={<NotaPage />} />
+              <Route path="/transaksi/:id/hpp" element={<TransaksiHppPage />} />
               <Route path="/customer" element={<CustomersPage />} />
-              <Route path="/produk" element={<ProductsPage />} />
               <Route
-                path="/gudang"
-                element={<PlaceholderPage title="Gudang" />}
+                path="/produk"
+                element={<Navigate to="/gudang/barang" replace />}
               />
-              <Route
-                path="/piutang"
-                element={<PlaceholderPage title="Piutang" />}
-              />
-              <Route
-                path="/invoice"
-                element={<PlaceholderPage title="Invoice" />}
-              />
-              <Route
-                path="/operasional"
-                element={<PlaceholderPage title="Biaya Operasional" />}
-              />
-              <Route
-                path="/pengaturan"
-                element={<PlaceholderPage title="Pengaturan" />}
-              />
+              <Route path="/gudang" element={<GudangLayout />}>
+                <Route index element={<GudangLokasiPage />} />
+                <Route path="kategori" element={<GudangKategoriPage />} />
+                <Route path="barang" element={<GudangBarangPage />} />
+                <Route path="stok" element={<GudangStokPage />} />
+                <Route path="mutasi" element={<GudangMutasiPage />} />
+              </Route>
+              <Route path="/piutang" element={<PiutangPage />} />
+              <Route path="/invoice" element={<InvoiceListPage />} />
+              <Route path="/invoice/buat" element={<InvoiceBuatPage />} />
+              <Route path="/invoice/:id" element={<InvoiceDetailPage />} />
+              <Route path="/operasional" element={<OperasionalPage />} />
+              <Route path="/pengaturan" element={<PengaturanPage />} />
+              <Route path="/pengaturan/user" element={<PengaturanUserPage />} />
             </Route>
           </Route>
 

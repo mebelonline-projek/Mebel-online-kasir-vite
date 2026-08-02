@@ -1,5 +1,6 @@
 interface Props {
   data: number[];
+  /** Arah tren: positif = naik, negatif = turun, 0 = flat */
   trend: number;
   className?: string;
   width?: number;
@@ -25,9 +26,11 @@ export function Sparkline({ data, trend, className = "", width = 80, height = 28
   const areaD = `${pathD} L${(data.length - 1) * stepX},${height} L0,${height} Z`;
 
   const fillColor =
-    trend >= 0
+    trend > 0
       ? "fill-emerald-500/10 dark:fill-emerald-400/10"
-      : "fill-destructive/10";
+      : trend < 0
+        ? "fill-destructive/10"
+        : "fill-muted-foreground/10";
 
   return (
     <svg

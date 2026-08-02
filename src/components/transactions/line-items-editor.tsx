@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { SearchablePicker } from "@/components/shared/searchable-picker";
 import { Button } from "@/components/ui/button";
@@ -5,6 +6,10 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { getStockQty } from "@/lib/catalog-cache";
 import { formatCurrency } from "@/lib/formatters";
+import {
+  isSellableProduct,
+  productDisplayName,
+} from "@/lib/inventory-helpers";
 import type {
   CachedProduct,
   CachedStock,
@@ -63,11 +68,18 @@ export function LineItemsEditor({
     warehouses.find((w) => w.is_sales_warehouse && w.is_active) || null;
   const activeWarehouses = warehouses.filter((w) => w.is_active);
 
-  const productOptions = products.map((p) => ({
-    id: p.id,
-    label: p.name,
-    sublabel: `${p.category} — ${formatCurrency(p.base_price)}`,
-  }));
+  const productOptions = useMemo(() => {
+    const sellable = products.filter((p) => isSellableProduct(p, products));
+    return sellable.map((p) => ({
+      id: p.id,
+      label: productDisplayName(p),
+      sublabel: `${p.category} — ${formatCurrency(p.base_price)}`,
+      searchName: p.name,
+      searchWarna: p.warna,
+      searchUkuran: p.ukuran,
+      searchCategory: p.category,
+    }));
+  }, [products]);
 
   const updateItem = (key: string, patch: Partial<LineItem>) => {
     onChange(

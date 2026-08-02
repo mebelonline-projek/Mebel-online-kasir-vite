@@ -5,6 +5,7 @@ import {
   type CachedTransactionRow,
   type PendingTransaction,
 } from "@/lib/offline-db";
+import { getWibDateString, wibNoonISO } from "@/lib/date-utils";
 
 const CACHE_LIMIT = 50;
 
@@ -12,6 +13,10 @@ function pendingToRow(item: PendingTransaction): CachedTransactionRow {
   const isCash = item.payload.payment_type === "CASH";
   const finalPrice = item.payload.final_price;
   const dp = isCash ? finalPrice : item.payload.dp_amount;
+  const businessDate =
+    item.payload.transaction_date && item.payload.transaction_date.length > 0
+      ? item.payload.transaction_date
+      : getWibDateString(new Date(item.createdAt));
   return {
     id: `offline:${item.clientId}`,
     transaction_number:
@@ -22,7 +27,7 @@ function pendingToRow(item: PendingTransaction): CachedTransactionRow {
     payment_type: item.payload.payment_type,
     dp_amount: dp,
     status: item.status === "failed" ? "GAGAL" : isCash ? "LUNAS" : "DP",
-    created_at: new Date(item.createdAt).toISOString(),
+    created_at: wibNoonISO(businessDate),
     client_id: item.clientId,
     offlinePending: true,
     cachedAt: Date.now(),

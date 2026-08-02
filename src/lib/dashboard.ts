@@ -25,6 +25,16 @@ export interface DashboardMonthlyData {
   txCount: number;
 }
 
+/** Tren KPI — arah dari selisih absolut; % di-cap / dikosongkan jika tak bermakna */
+export interface DashboardTrend {
+  direction: "up" | "down" | "flat";
+  /** Nilai absolut untuk ditampilkan; null jika mode khusus tanpa % */
+  percent: number | null;
+  mode: "percent" | "from_loss" | "from_zero" | "to_loss" | "flat";
+  /** true jika % sudah di-cap di 999 */
+  capped?: boolean;
+}
+
 export interface DashboardStats {
   revenue: number;
   hpp: number;
@@ -37,10 +47,10 @@ export interface DashboardStats {
   prevGrossProfit: number;
   prevNetProfit: number;
   prevNetMargin: number;
-  revenueTrend: number;
-  grossProfitTrend: number;
-  netProfitTrend: number;
-  netMarginTrend: number;
+  revenueTrend: DashboardTrend;
+  grossProfitTrend: DashboardTrend;
+  netProfitTrend: DashboardTrend;
+  netMarginTrend: DashboardTrend;
   monthlyData: DashboardMonthlyData[];
   recentTransactions: Array<{
     id: string;
@@ -59,8 +69,7 @@ type PaymentRow = {
   transactions: unknown;
 };
 
-type TxRow = { id: string; status: string; created_at: string };
-type HppRow = { amount: number; transaction_id: string };
+type TxRow = { id: string; status: string; created_at: string; final_price?: number };
 type OpCostRow = { amount: number; period_start: string; period_end: string };
 
 function fmtDateISO(d: Date): string {
@@ -108,7 +117,7 @@ async function fetchChartRawData(chartStart: Date, chartEnd: Date) {
     fetchAllRows<TxRow>(async (from, to) =>
       supabase
         .from("transactions")
-        .select("id, status, created_at")
+        .select("id, status, created_at, final_price")
         .gte("created_at", startIso)
         .lte("created_at", endIso)
         .order("created_at", { ascending: true })
@@ -125,50 +134,124 @@ async function fetchChartRawData(chartStart: Date, chartEnd: Date) {
     ),
   ]);
 
-  const validTxIds = allTx.filter((t) => t.status !== "BATAL").map((t) => t.id);
-  const allHpp: HppRow[] = [];
+  // Transaksi yang hanya muncul lewat pembayaran (dibuat di luar rentang chart)
+  const knownTxIds = new Set(allTx.map((t) => t.id));
+  const missingPaymentTxIds = [
+    ...new Set(
+      allPayments
+        .map((p) => p.transaction_id)
+        .filter((id) => id && !knownTxIds.has(id))
+    ),
+  ];
+  const extraTx: Array<{ id: string; status: string; created_at: string; final_price: number }> = [];
   const chunkSize = 200;
-  for (let i = 0; i < validTxIds.length; i += chunkSize) {
-    const chunk = validTxIds.slice(i, i + chunkSize);
-    const chunkRows = await fetchAllRows<HppRow>(async (from, to) =>
+  for (let i = 0; i < missingPaymentTxIds.length; i += chunkSize) {
+    const chunk = missingPaymentTxIds.slice(i, i + chunkSize);
+    const rows = await fetchAllRows<{
+      id: string;
+      status: string;
+      created_at: string;
+      final_price: number;
+    }>(async (from, to) =>
       supabase
-        .from("hpp_items")
-        .select("amount, transaction_id")
-        .in("transaction_id", chunk)
-        .order("transaction_id", { ascending: true })
+        .from("transactions")
+        .select("id, status, created_at, final_price")
+        .in("id", chunk)
+        .order("id", { ascending: true })
         .range(from, to)
+    );
+    extraTx.push(...rows);
+  }
+
+  const txMeta = [...allTx, ...extraTx];
+  const finalPriceByTx = new Map<string, number>();
+  for (const t of txMeta) {
+    finalPriceByTx.set(t.id, Number(t.final_price) || 0);
+  }
+
+  const hppTxIds = [
+    ...new Set([
+      ...allTx.filter((t) => t.status !== "BATAL").map((t) => t.id),
+      ...extraTx.filter((t) => t.status !== "BATAL").map((t) => t.id),
+      ...allPayments.map((p) => p.transaction_id),
+    ]),
+  ];
+
+  const allHpp: Array<{ amount: number; transaction_id: string }> = [];
+  for (let i = 0; i < hppTxIds.length; i += chunkSize) {
+    const chunk = hppTxIds.slice(i, i + chunkSize);
+    const chunkRows = await fetchAllRows<{ amount: number; transaction_id: string }>(
+      async (from, to) =>
+        supabase
+          .from("hpp_items")
+          .select("amount, transaction_id")
+          .in("transaction_id", chunk)
+          .order("transaction_id", { ascending: true })
+          .range(from, to)
     );
     allHpp.push(...chunkRows);
   }
 
-  return { allPayments, allTx, allHpp, allOpCosts };
+  const hppByTx = new Map<string, number>();
+  for (const h of allHpp) {
+    hppByTx.set(h.transaction_id, (hppByTx.get(h.transaction_id) || 0) + (h.amount || 0));
+  }
+
+  return {
+    allPayments,
+    allTx,
+    allOpCosts,
+    finalPriceByTx,
+    hppByTx,
+  };
+}
+
+function paymentTxStatus(transactions: unknown): string | undefined {
+  const tx = transactions;
+  if (Array.isArray(tx)) {
+    return (tx[0] as { status: string } | undefined)?.status;
+  }
+  return (tx as { status: string } | null)?.status;
 }
 
 function aggregatePaymentsInRange(
   payments: PaymentRow[],
   rangeStart: Date,
   rangeEnd: Date
-): { revenue: number; txIds: string[] } {
+): { revenue: number; paidByTx: Map<string, number> } {
   const rStart = rangeStart.getTime();
   const rEnd = rangeEnd.getTime();
-  const valid = payments.filter((p) => {
+  const paidByTx = new Map<string, number>();
+  let revenue = 0;
+
+  for (const p of payments) {
     const d = new Date(p.payment_date).getTime();
-    if (d < rStart || d > rEnd) return false;
-    const tx = p.transactions;
-    const status = Array.isArray(tx)
-      ? (tx[0] as { status: string } | undefined)?.status
-      : (tx as { status: string } | null)?.status;
-    return status !== "BATAL";
-  });
-  const revenue = valid.reduce((s, p) => s + (p.amount || 0), 0);
-  const txIds = [...new Set(valid.map((p) => p.transaction_id))];
-  return { revenue, txIds };
+    if (d < rStart || d > rEnd) continue;
+    if (paymentTxStatus(p.transactions) === "BATAL") continue;
+    const amount = p.amount || 0;
+    revenue += amount;
+    paidByTx.set(p.transaction_id, (paidByTx.get(p.transaction_id) || 0) + amount);
+  }
+
+  return { revenue, paidByTx };
 }
 
-function sumHppForBatch(hppItems: HppRow[], txIds: Set<string>): number {
-  return hppItems
-    .filter((h) => txIds.has(h.transaction_id))
-    .reduce((s, h) => s + (h.amount || 0), 0);
+/** HPP dialokasikan proporsional: (bayar periode / harga final) × total HPP transaksi */
+function sumProportionalHpp(
+  paidByTx: Map<string, number>,
+  hppByTx: Map<string, number>,
+  finalPriceByTx: Map<string, number>
+): number {
+  let total = 0;
+  for (const [txId, paid] of paidByTx) {
+    if (paid <= 0) continue;
+    const finalPrice = finalPriceByTx.get(txId) || 0;
+    const hpp = hppByTx.get(txId) || 0;
+    if (finalPrice <= 0 || hpp === 0) continue;
+    const ratio = Math.min(paid / finalPrice, 1);
+    total += hpp * ratio;
+  }
+  return Math.round(total);
 }
 
 function aggregateOpCostsInRange(
@@ -213,15 +296,15 @@ interface PeriodStat {
 
 function computePeriodStat(
   payments: PaymentRow[],
-  hppItems: HppRow[],
   opCosts: OpCostRow[],
   allTx: TxRow[],
+  hppByTx: Map<string, number>,
+  finalPriceByTx: Map<string, number>,
   rangeStart: Date,
   rangeEnd: Date
 ): PeriodStat {
-  const { revenue, txIds } = aggregatePaymentsInRange(payments, rangeStart, rangeEnd);
-  const txIdSet = new Set(txIds);
-  const hpp = sumHppForBatch(hppItems, txIdSet);
+  const { revenue, paidByTx } = aggregatePaymentsInRange(payments, rangeStart, rangeEnd);
+  const hpp = sumProportionalHpp(paidByTx, hppByTx, finalPriceByTx);
   const grossProfit = revenue - hpp;
   const operationalCosts = aggregateOpCostsInRange(opCosts, rangeStart, rangeEnd);
   const netProfit = grossProfit - operationalCosts;
@@ -230,28 +313,95 @@ function computePeriodStat(
   return { revenue, hpp, grossProfit, operationalCosts, netProfit, netMargin, txCount };
 }
 
+const TREND_PERCENT_CAP = 999;
+
+/** Hitung tren dengan arah dari selisih absolut; hindari % gila saat basis ≤ 0 */
+function calcDashboardTrend(curr: number, prevVal: number): DashboardTrend {
+  const delta = curr - prevVal;
+  if (delta === 0) {
+    return { direction: "flat", percent: null, mode: "flat" };
+  }
+
+  const direction: "up" | "down" = delta > 0 ? "up" : "down";
+
+  if (prevVal === 0) {
+    return {
+      direction,
+      percent: null,
+      mode: curr > 0 ? "from_zero" : "to_loss",
+    };
+  }
+
+  // Rugi → untung/nol: % relatif tidak bermakna
+  if (prevVal < 0 && curr >= 0) {
+    return { direction: "up", percent: null, mode: "from_loss" };
+  }
+
+  // Untung → rugi: tetap tampilkan % (berguna), arah turun
+  if (prevVal > 0 && curr < 0) {
+    const raw = Math.abs((delta / prevVal) * 100);
+    const capped = raw > TREND_PERCENT_CAP;
+    return {
+      direction: "down",
+      percent: Math.round((capped ? TREND_PERCENT_CAP : raw) * 10) / 10,
+      mode: "to_loss",
+      capped: capped || undefined,
+    };
+  }
+
+  const raw = Math.abs((delta / Math.abs(prevVal)) * 100);
+  const capped = raw > TREND_PERCENT_CAP;
+  return {
+    direction,
+    percent: Math.round((capped ? TREND_PERCENT_CAP : raw) * 10) / 10,
+    mode: "percent",
+    capped: capped || undefined,
+  };
+}
+
+function calcMarginTrend(curr: number, prevVal: number): DashboardTrend {
+  const delta = Math.round((curr - prevVal) * 10) / 10;
+  if (delta === 0) return { direction: "flat", percent: null, mode: "flat" };
+  return {
+    direction: delta > 0 ? "up" : "down",
+    percent: Math.abs(delta),
+    mode: "percent",
+  };
+}
+
 async function computeDashboardStats(period: PeriodType): Promise<DashboardStats> {
   const today = getWibDateString();
   const { kpiStart, kpiEnd, prevStart, prevEnd, chartStart, chartEnd } =
     getWibPeriodBounds(period);
-  const { allPayments, allTx, allHpp, allOpCosts } = await fetchChartRawData(
-    chartStart,
-    chartEnd
+  const { allPayments, allTx, allOpCosts, finalPriceByTx, hppByTx } =
+    await fetchChartRawData(chartStart, chartEnd);
+
+  const kpi = computePeriodStat(
+    allPayments,
+    allOpCosts,
+    allTx,
+    hppByTx,
+    finalPriceByTx,
+    kpiStart,
+    kpiEnd
+  );
+  const prev = computePeriodStat(
+    allPayments,
+    allOpCosts,
+    allTx,
+    hppByTx,
+    finalPriceByTx,
+    prevStart,
+    prevEnd
   );
 
-  const kpi = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, kpiStart, kpiEnd);
-  const prev = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, prevStart, prevEnd);
-
-  const calcTrend = (curr: number, prevVal: number): number => {
-    if (prevVal === 0 && curr === 0) return 0;
-    if (prevVal === 0) return 100;
-    return Math.round(((curr - prevVal) / prevVal) * 1000) / 10;
-  };
-
-  const revenueTrend = calcTrend(kpi.revenue, prev.revenue);
-  const grossProfitTrend = calcTrend(kpi.grossProfit, prev.grossProfit);
-  const netProfitTrend = calcTrend(kpi.netProfit, prev.netProfit);
-  const netMarginTrend = Math.round((kpi.netMargin - prev.netMargin) * 10) / 10;
+  const revenueTrend = calcDashboardTrend(kpi.revenue, prev.revenue);
+  const grossProfitTrend = calcDashboardTrend(kpi.grossProfit, prev.grossProfit);
+  const netProfitTrend = calcDashboardTrend(kpi.netProfit, prev.netProfit);
+  const netMarginTrend =
+    kpi.revenue > 0 || prev.revenue > 0
+      ? calcMarginTrend(kpi.netMargin, prev.netMargin)
+      : { direction: "flat" as const, percent: null, mode: "flat" as const };
 
   const monthlyData: DashboardMonthlyData[] = [];
   const monthLabels = [
@@ -274,7 +424,15 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const dateStr = addWibDays(today, -d);
       const s = wibToDate(wibStartISO(dateStr));
       const e = wibToDate(wibEndISO(dateStr));
-      const stat = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, s, e);
+      const stat = computePeriodStat(
+        allPayments,
+        allOpCosts,
+        allTx,
+        hppByTx,
+        finalPriceByTx,
+        s,
+        e
+      );
       const { day, month } = parseWibDate(dateStr);
       monthlyData.push({
         month: dateStr,
@@ -297,7 +455,15 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const weekEndStr = addWibDays(weekStartStr, 6);
       const s = wibToDate(wibStartISO(weekStartStr));
       const e = wibToDate(wibEndISO(weekEndStr));
-      const stat = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, s, e);
+      const stat = computePeriodStat(
+        allPayments,
+        allOpCosts,
+        allTx,
+        hppByTx,
+        finalPriceByTx,
+        s,
+        e
+      );
       const ws = parseWibDate(weekStartStr);
       const we = parseWibDate(weekEndStr);
       monthlyData.push({
@@ -324,7 +490,15 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const monthEndStr = getWibMonthEnd(monthStartStr);
       const s = wibToDate(wibStartISO(monthStartStr));
       const e = wibToDate(wibEndISO(monthEndStr));
-      const stat = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, s, e);
+      const stat = computePeriodStat(
+        allPayments,
+        allOpCosts,
+        allTx,
+        hppByTx,
+        finalPriceByTx,
+        s,
+        e
+      );
       monthlyData.push({
         month: `${cy}-${String(cm).padStart(2, "0")}`,
         monthLabel: `${monthLabels[cm - 1]} ${cy}`,
@@ -342,7 +516,15 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const year = currentYear - y;
       const s = wibToDate(wibStartISO(`${year}-01-01`));
       const e = wibToDate(wibEndISO(`${year}-12-31`));
-      const stat = computePeriodStat(allPayments, allHpp, allOpCosts, allTx, s, e);
+      const stat = computePeriodStat(
+        allPayments,
+        allOpCosts,
+        allTx,
+        hppByTx,
+        finalPriceByTx,
+        s,
+        e
+      );
       monthlyData.push({
         month: `${year}`,
         monthLabel: `${year}`,

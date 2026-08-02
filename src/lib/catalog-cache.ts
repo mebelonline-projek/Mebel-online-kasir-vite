@@ -31,9 +31,11 @@ export async function refreshCatalogCache(): Promise<void> {
         .limit(200),
       supabase
         .from("products")
-        .select("id, name, category, base_price, unit")
+        .select(
+          "id, name, category, base_price, unit, parent_id, warna, ukuran, min_stock"
+        )
         .order("name")
-        .limit(200),
+        .limit(500),
       supabase
         .from("warehouses")
         .select("id, name, is_active, is_sales_warehouse")
@@ -65,6 +67,10 @@ export async function refreshCatalogCache(): Promise<void> {
       category: (p.category as string) || "-",
       base_price: Number(p.base_price),
       unit: (p.unit as string) || "pcs",
+      parent_id: (p.parent_id as string | null) ?? null,
+      warna: (p.warna as string | null) ?? null,
+      ukuran: (p.ukuran as string | null) ?? null,
+      min_stock: Number(p.min_stock) || 0,
       cachedAt: now,
     }));
     await offlineDb.cachedProducts.clear();

@@ -6,6 +6,9 @@ import {
   Users,
   Package,
   Warehouse,
+  Tags,
+  Boxes,
+  ArrowLeftRight,
   Wallet,
   FileText,
   Wrench,
@@ -29,7 +32,13 @@ export function MobileNavMenu({ role }: { role: string }) {
 
   const menuItems =
     role === "GUDANG"
-      ? [{ label: "Gudang", href: "/gudang", icon: Warehouse }]
+      ? [
+          { label: "Gudang", href: "/gudang", icon: Warehouse },
+          { label: "Kategori", href: "/gudang/kategori", icon: Tags },
+          { label: "Barang", href: "/gudang/barang", icon: Package },
+          { label: "Stok", href: "/gudang/stok", icon: Boxes },
+          { label: "Mutasi", href: "/gudang/mutasi", icon: ArrowLeftRight },
+        ]
       : [
           { label: "Kasir", href: "/kasir", icon: Plus },
           {
@@ -83,7 +92,7 @@ export function MobileNavMenu({ role }: { role: string }) {
         <SheetHeader className="pb-2 text-left">
           <SheetTitle>Navigasi</SheetTitle>
         </SheetHeader>
-        <nav className="grid grid-cols-2 gap-2 px-4 pt-2 pb-4">
+        <nav className="grid grid-cols-2 gap-2 pt-2">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive =

@@ -8,12 +8,20 @@ export interface CachedDashboardStats {
   cachedAt: number;
 }
 
+/** Cache lama menyimpan trend sebagai number — abaikan agar UI pakai bentuk DashboardTrend. */
+function isValidCachedStats(stats: DashboardStats | undefined): stats is DashboardStats {
+  if (!stats) return false;
+  const trend = stats.revenueTrend;
+  return typeof trend === "object" && trend !== null && "direction" in trend;
+}
+
 export async function getCachedDashboardStats(
   period: PeriodType
 ): Promise<DashboardStats | null> {
   if (!offlineDb) return null;
   const row = await offlineDb.cachedDashboard.get(period);
-  return row?.stats ?? null;
+  if (!isValidCachedStats(row?.stats)) return null;
+  return row.stats;
 }
 
 export async function saveDashboardStatsCache(

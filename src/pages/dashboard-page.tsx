@@ -5,6 +5,7 @@ import { OwnerChartWrapper } from "@/components/dashboard/owner-chart-wrapper";
 import { PeriodSelector, periodOptions } from "@/components/dashboard/period-selector";
 import { Sparkline } from "@/components/dashboard/sparkline";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { DashboardSkeleton } from "@/components/shared/page-skeleton";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -20,7 +21,7 @@ import {
   getCachedDashboardStats,
   loadDashboardStatsLive,
 } from "@/lib/dashboard-cache";
-import type { DashboardStats, PeriodType } from "@/lib/dashboard";
+import type { DashboardStats, DashboardTrend, PeriodType } from "@/lib/dashboard";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 
 function extractSparklineData(
@@ -30,6 +31,29 @@ function extractSparklineData(
   return data.map((d) => d[metric]);
 }
 
+function trendIsUp(trend: DashboardTrend): boolean {
+  return trend.direction === "up";
+}
+
+function formatTrendLabel(
+  trend: DashboardTrend,
+  unit: "percent" | "points"
+): string {
+  if (trend.direction === "flat" || trend.mode === "flat") return "— Tetap";
+
+  const naik = trend.direction === "up";
+  if (trend.mode === "from_loss") return "Naik (dari rugi)";
+  if (trend.mode === "from_zero") return naik ? "Naik (dari nol)" : "Turun (dari nol)";
+  if (trend.mode === "to_loss" && trend.percent == null) return "Turun (jadi rugi)";
+
+  if (trend.percent == null) return naik ? "Naik" : "Turun";
+
+  const value =
+    trend.capped || trend.percent >= 999 ? ">999" : String(trend.percent);
+  const suffix = unit === "points" ? " poin" : "%";
+  return `${naik ? "Naik" : "Turun"} ${value}${suffix}`;
+}
+
 function DashboardBody({ period }: { period: PeriodType }) {
   const { data: stats, loading, refreshing, error } = useLiveData({
     getCached: () => getCachedDashboardStats(period),
@@ -37,11 +61,7 @@ function DashboardBody({ period }: { period: PeriodType }) {
   });
 
   if (loading && !stats) {
-    return (
-      <div className="flex items-center justify-center py-24 text-muted-foreground">
-        Memuat ringkasan...
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   if (error && !stats) {
@@ -62,20 +82,30 @@ function DashboardBody({ period }: { period: PeriodType }) {
   );
   const netMarginDisplay = stats.revenue > 0 ? `${stats.netMargin}%` : "-";
 
-  const kpiCards = [
+  const kpiCards: Array<{
+    title: string;
+    subtitle: string;
+    value: string;
+    trend: DashboardTrend;
+    trendUnit: "percent" | "points";
+    icon: typeof DollarSign;
+    sparklineData: number[];
+  }> = [
     {
       title: "Omzet",
-      subtitle: "Total Penjualan",
+      subtitle: "Uang masuk",
       value: formatCurrency(stats.revenue),
       trend: stats.revenueTrend,
+      trendUnit: "percent",
       icon: DollarSign,
       sparklineData: revenueSparkline,
     },
     {
       title: "Laba Kotor",
-      subtitle: "Omzet - HPP",
+      subtitle: "Omzet - HPP (proporsional)",
       value: formatCurrency(stats.grossProfit),
       trend: stats.grossProfitTrend,
+      trendUnit: "percent",
       icon: TrendingUp,
       sparklineData: grossProfitSparkline,
     },
@@ -84,6 +114,7 @@ function DashboardBody({ period }: { period: PeriodType }) {
       subtitle: "Laba Kotor - Biaya Operasional",
       value: formatCurrency(stats.netProfit),
       trend: stats.netProfitTrend,
+      trendUnit: "percent",
       icon: TrendingUp,
       sparklineData: netProfitSparkline,
     },
@@ -91,7 +122,8 @@ function DashboardBody({ period }: { period: PeriodType }) {
       title: "Margin Bersih",
       subtitle: "Persentase Laba Bersih dari Omzet",
       value: netMarginDisplay,
-      trend: stats.revenue > 0 ? stats.netMarginTrend : 0,
+      trend: stats.netMarginTrend,
+      trendUnit: "points",
       icon: Percent,
       sparklineData: marginSparkline,
     },
@@ -133,8 +165,11 @@ function DashboardBody({ period }: { period: PeriodType }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         {kpiCards.map((card) => {
           const Icon = card.icon;
-          const sparkColor =
-            card.trend >= 0
+          const up = trendIsUp(card.trend);
+          const flat = card.trend.direction === "flat";
+          const sparkColor = flat
+            ? "stroke-muted-foreground"
+            : up
               ? "stroke-emerald-500 dark:stroke-emerald-400"
               : "stroke-destructive";
           return (
@@ -159,22 +194,22 @@ function DashboardBody({ period }: { period: PeriodType }) {
                 </div>
                 <div className="text-2xl font-bold tracking-tight">{card.value}</div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {card.trend > 0 ? (
+                  {flat ? (
+                    <span className="text-xs font-bold text-muted-foreground">
+                      {formatTrendLabel(card.trend, card.trendUnit)}
+                    </span>
+                  ) : up ? (
                     <span className="text-xs font-bold inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
                       <TrendingUp className="w-3 h-3" />
-                      Naik {card.trend}%
-                    </span>
-                  ) : card.trend < 0 ? (
-                    <span className="text-xs font-bold inline-flex items-center gap-0.5 text-destructive">
-                      <TrendingDown className="w-3 h-3" />
-                      Turun {Math.abs(card.trend)}%
+                      {formatTrendLabel(card.trend, card.trendUnit)}
                     </span>
                   ) : (
-                    <span className="text-xs font-bold text-muted-foreground">
-                      — Tetap
+                    <span className="text-xs font-bold inline-flex items-center gap-0.5 text-destructive">
+                      <TrendingDown className="w-3 h-3" />
+                      {formatTrendLabel(card.trend, card.trendUnit)}
                     </span>
                   )}
-                  {card.trend !== 0 && (
+                  {!flat && (
                     <span className="text-xs text-muted-foreground">
                       dari {periodLabel} lalu
                     </span>
@@ -183,7 +218,7 @@ function DashboardBody({ period }: { period: PeriodType }) {
                 {card.sparklineData.length >= 2 && (
                   <Sparkline
                     data={card.sparklineData}
-                    trend={card.trend}
+                    trend={up ? 1 : flat ? 0 : -1}
                     className={sparkColor}
                   />
                 )}
@@ -297,7 +332,7 @@ export function DashboardPage() {
   const [period, setPeriod] = useState<PeriodType>("monthly");
 
   return (
-    <div className="space-y-6 p-4 md:p-6 lg:p-8">
+    <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
@@ -307,11 +342,11 @@ export function DashboardPage() {
             {period === "daily" &&
               "KPI = hari ini vs kemarin. Grafik = 30 hari terakhir."}
             {period === "weekly" &&
-              "KPI = minggu ini vs minggu lalu. Grafik = 12 minggu terakhir."}
+              "KPI = minggu ini s/d hari ini vs rentang sama minggu lalu. Grafik = 12 minggu."}
             {period === "monthly" &&
-              "KPI = bulan ini vs bulan lalu. Grafik = 12 bulan terakhir."}
+              "KPI = bulan ini s/d hari ini vs tanggal sama bulan lalu. Grafik = 12 bulan."}
             {period === "yearly" &&
-              "KPI = tahun ini vs tahun lalu. Grafik = 5 tahun terakhir."}
+              "KPI = tahun ini s/d hari ini vs tanggal sama tahun lalu. Grafik = 5 tahun."}
           </p>
         </div>
         <PeriodSelector currentPeriod={period} onPeriodChange={setPeriod} />

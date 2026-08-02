@@ -5,7 +5,7 @@ import { getDashboardHref, useAuth } from "@/contexts/auth-context";
 import { supabase } from "@/lib/supabase";
 import { loginSchema } from "@/lib/validation";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -104,14 +104,9 @@ export function LoginPage() {
             {loading ? "Memproses..." : "Masuk"}
           </Button>
         </form>
-        <div className="space-y-2 text-center">
-          <Link
-            to="/register"
-            className="text-sm font-medium text-accent hover:underline"
-          >
-            Belum punya akun? Daftar
-          </Link>
-        </div>
+        <p className="text-center text-xs text-muted-foreground">
+          Butuh akun baru? Minta Owner menambahkan di Pengaturan → User.
+        </p>
       </div>
     </div>
   );

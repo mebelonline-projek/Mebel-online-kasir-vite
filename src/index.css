@@ -400,8 +400,15 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Unlayered so it beats Tailwind utilities — include lg reset here
+   (lg:pb-0 on the same node cannot override this class). */
 .pb-safe {
   padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+}
+@media (min-width: 1024px) {
+  .pb-safe {
+    padding-bottom: 0;
+  }
 }
 
 .fab-bottom {

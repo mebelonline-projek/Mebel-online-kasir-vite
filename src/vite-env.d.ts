@@ -4,6 +4,7 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_URL: string;
   readonly VITE_SUPABASE_ANON_KEY: string;
   readonly VITE_EDGE_APPLY_SALE_STOCK_URL?: string;
+  readonly VITE_EDGE_MANAGE_USERS_URL?: string;
 }
 
 interface ImportMeta {

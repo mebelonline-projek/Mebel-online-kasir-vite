@@ -25,7 +25,11 @@ dist-ssr
 
 # Cloudflare / Wrangler
 .wrangler
+.wrangler-dry
 .dev.vars
+
+# Agent / local tsc dumps
+tsc-*.txt
 
 # Supabase CLI
 supabase/.temp

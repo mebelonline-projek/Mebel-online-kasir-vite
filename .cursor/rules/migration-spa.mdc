@@ -22,17 +22,20 @@ UI minimal = sementara. Jangan anggap selesai tanpa parity visual.
 
 ## Antrian default jika user bilang “lanjut”
 
-1. Void (+ restore stok via Edge `apply-sale-stock` action restore).
-2. Gudang → operasional → piutang → invoice → pengaturan.
-3. Nota/PDF, HPP; uji PWA jika diminta; cutover terakhir.
+1. Cutover DNS domain toko → SPA **hanya jika user minta**; Next = fallback `v1-next-stable`.
+2. Uji PWA di HP fisik toko (opsional; Playwright mobile/SW sudah).
 
-Hosting online/offline sudah OK. Dashboard KPI OWNER sudah di-port. Edge `apply-sale-stock` sudah deploy + Build var Cloudflare OK. Jangan ulang uji hosting / fix cache Next kecuali diminta.
+Smoke manage-users + transaksi (data uji lalu dibersihkan), redeploy Workers + `VITE_EDGE_MANAGE_USERS_URL` baked, PWA Playwright: **sudah**. Hosting online/offline sudah OK. Modul besar + UI parity + transaksi detail/list sudah. **Jangan mutasi data toko lama** saat uji. Jangan ulang uji hosting / fix cache Next kecuali diminta. Jangan ulang siklus `supabase login` → 401 token.
 
-## Fitur klien (Next dulu → SPA roadmap)
+## Fitur klien (Next selesai → SPA roadmap)
 
-- Search Gudang/Stok + varian parent/child (`parent_id`, `warna`, `ukuran`): **implement di Next** (produksi).
-- SPA **jangan** kerjakan sekarang. Port saat giliran modul gudang/produk (lihat tabel di `MIGRATION-HANDOFF.md`).
-- Stok/kasir/Edge tetap per `product_id` (leaf/child). Jangan pecah skema hanya di satu repo.
+- Search Gudang/Stok + varian parent/child: **sudah di Next + sudah di SPA**.
+- Tanggal custom transaksi (create only): **sudah di Next + sudah di SPA**.
+- Upload foto barang: **sudah di Next + sudah di SPA**.
+- Nota/PDF + HPP per transaksi: **sudah di Next + sudah di SPA**.
+- Dashboard keuangan (trend/HPP/MTD): **sudah di Next + sudah di SPA**.
+- Transaksi detail/list parity (edit DP, fulfillment, hapus, WA, CSV): **sudah di Next + sudah di SPA**.
+- Stok/kasir/Edge tetap per `product_id` (leaf). Jangan pecah skema hanya di satu repo.
 
 ## Preferensi sesi
 
@@ -41,6 +44,9 @@ Hosting online/offline sudah OK. Dashboard KPI OWNER sudah di-port. Edge `apply-
 
 ## Deploy pitfalls
 
+- Edge deploy: **jangan** suruh user `supabase login` berulang. Token tidak persist → 401 tiap sesi.
+  Pakai env var User `SUPABASE_ACCESS_TOKEN` (sekali set) + `npx supabase functions deploy ... --use-api`.
+  Docker tidak diperlukan. Detail: `supabase/README.md`.
 - Jangan `_redirects /* /index.html 200` (error Workers).
 - Env Vite: Cloudflare **Build variables**, bukan Variables runtime (static-only Worker).
 - Setelah deploy env: hard refresh / clear SW jika masih “Konfigurasi diperlukan” atau UI lama.

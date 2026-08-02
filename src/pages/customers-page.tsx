@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageListSkeleton } from "@/components/shared/page-skeleton";
 import {
   Dialog,
   DialogContent,
@@ -161,7 +162,7 @@ export function CustomersPage() {
       </div>
 
       {loading ? (
-        <p className="text-muted-foreground">Memuat...</p>
+        <PageListSkeleton />
       ) : filtered.length === 0 ? (
         <Card className="shadow-sm">
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
