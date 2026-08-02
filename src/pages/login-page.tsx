@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { getDashboardHref, useAuth } from "@/contexts/auth-context";
 import { supabase } from "@/lib/supabase";
 import { loginSchema } from "@/lib/validation";
+import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -12,6 +13,7 @@ export function LoginPage() {
   const { configured, refreshProfile } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -91,14 +93,31 @@ export function LoginPage() {
             <label className="text-xs font-medium text-muted-foreground">
               Password
             </label>
-            <Input
-              type="password"
-              placeholder="........"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="........"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="pr-9"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:text-foreground"
+                aria-label={
+                  showPassword ? "Sembunyikan sandi" : "Tampilkan sandi"
+                }
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
           </div>
           <Button type="submit" disabled={loading} className="w-full">
             {loading ? "Memproses..." : "Masuk"}
