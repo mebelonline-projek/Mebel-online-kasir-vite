@@ -1,12 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, Printer } from "lucide-react";
+import { ArrowLeft, Download, Printer, Usb } from "lucide-react";
 import { toast } from "sonner";
 import type { InvoiceLineItem } from "@/components/invoice/invoice-document";
 import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { buildNotaPdfData } from "@/lib/pdf-invoice";
+import {
+  buildThermalNotaEscPos,
+  isWebSerialSupported,
+  printViaWebSerial,
+} from "@/lib/thermal-escpos";
 
 interface PaymentItem {
   id: string;
@@ -51,6 +56,12 @@ export function NotaDocument({
 }: NotaProps) {
   const navigate = useNavigate();
   const [savingPdf, setSavingPdf] = useState(false);
+  const [printingThermal, setPrintingThermal] = useState(false);
+  const [serialOk, setSerialOk] = useState(false);
+
+  useEffect(() => {
+    setSerialOk(isWebSerialSupported());
+  }, []);
 
   const handleSavePdf = async () => {
     setSavingPdf(true);
@@ -78,13 +89,49 @@ export function NotaDocument({
     }
   };
 
+  const handleThermalPrint = async () => {
+    setPrintingThermal(true);
+    try {
+      const payload = buildThermalNotaEscPos({
+        store_name,
+        store_address: store_address || undefined,
+        store_phone: store_phone || undefined,
+        transaction_number,
+        customer_name,
+        payment_type,
+        created_at,
+        lineItems,
+        final_price,
+        dp_amount,
+        status,
+        payments,
+      });
+      await printViaWebSerial(payload);
+      toast.success("Nota dikirim ke printer thermal");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (/NotFoundError|No port selected|cancelled/i.test(msg)) {
+        toast.message("Pemilihan printer dibatalkan");
+      } else {
+        toast.error(
+          "Gagal cetak thermal. Pastikan printer USB terhubung (Chrome PC), atau pakai Cetak Nota.",
+        );
+      }
+    } finally {
+      setPrintingThermal(false);
+    }
+  };
+
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
   const remaining = final_price - totalPaid;
   const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
 
   return (
     <div className="bg-background text-foreground">
-      <div className="mb-6 flex flex-wrap justify-end gap-3">
+      <div
+        className="mb-6 flex flex-wrap justify-end gap-3"
+        id="nota-toolbar"
+      >
         <Button
           variant="outline"
           size="sm"
@@ -98,6 +145,19 @@ export function NotaDocument({
           <Printer className="h-3.5 w-3.5" />
           Cetak Nota
         </Button>
+        {serialOk && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void handleThermalPrint()}
+            disabled={printingThermal}
+            className="gap-1"
+            title="Kirim ESC/POS langsung ke printer USB (Chrome PC)"
+          >
+            <Usb className="h-3.5 w-3.5" />
+            {printingThermal ? "Mencetak..." : "Cetak Thermal"}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -115,7 +175,10 @@ export function NotaDocument({
         id="nota-print-area"
       >
         <div className="mb-5 border-b border-dashed border-gray-300 pb-4 text-center">
-          <div className="mb-2 flex items-center justify-center">
+          <div
+            className="mb-2 flex items-center justify-center"
+            id="nota-print-logo"
+          >
             <StoreLogo
               src={logo_url}
               alt={store_name}
@@ -295,22 +358,76 @@ export function NotaDocument({
 
       <style>{`
         @media print {
+          @page {
+            size: 58mm auto;
+            margin: 2mm;
+          }
+          html, body {
+            background: #fff !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            width: 58mm;
+          }
           body * {
             visibility: hidden;
+          }
+          #nota-toolbar {
+            display: none !important;
           }
           #nota-print-area,
           #nota-print-area * {
             visibility: visible;
           }
+          #nota-print-logo {
+            display: none !important;
+          }
           #nota-print-area {
             position: absolute;
             left: 0;
             top: 0;
-            width: 100%;
-            max-width: 100%;
-            border: none;
-            box-shadow: none;
-            padding: 20px;
+            width: 54mm;
+            max-width: 54mm;
+            margin: 0;
+            padding: 1mm 2mm;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #fff !important;
+            color: #000 !important;
+            font-family: ui-monospace, "Courier New", monospace !important;
+            font-size: 9pt !important;
+            line-height: 1.25 !important;
+          }
+          #nota-print-area h1 {
+            font-size: 11pt !important;
+            letter-spacing: 0.05em !important;
+            margin: 0.2em 0 !important;
+          }
+          #nota-print-area h2 {
+            font-size: 10pt !important;
+            margin: 0 !important;
+          }
+          #nota-print-area h3,
+          #nota-print-area h4 {
+            font-size: 8pt !important;
+          }
+          #nota-print-area table,
+          #nota-print-area td,
+          #nota-print-area th,
+          #nota-print-area p,
+          #nota-print-area span {
+            font-size: 8pt !important;
+          }
+          #nota-print-area .text-base {
+            font-size: 9pt !important;
+          }
+          #nota-print-area .text-green-700,
+          #nota-print-area .text-red-600,
+          #nota-print-area .text-gray-400,
+          #nota-print-area .text-gray-500,
+          #nota-print-area .text-gray-600,
+          #nota-print-area .text-gray-900 {
+            color: #000 !important;
           }
         }
       `}</style>
