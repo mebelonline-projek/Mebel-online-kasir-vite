@@ -5,10 +5,13 @@
 // Body restore: { action: "restore", transactionId }
 // Body move: { action: "move", type: "IN"|"OUT"|"TRANSFER", productId, qty,
 //              fromWarehouseId?, toWarehouseId?, note? }
+// Body delete_movement: { action: "delete_movement", movementId }
+// Body edit_movement: { action: "edit_movement", movementId, type, productId, qty,
+//                       fromWarehouseId?, toWarehouseId?, note? }
 // Header: Authorization Bearer <user JWT>
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,11 +19,168 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
+type ManualType = "IN" | "OUT" | "TRANSFER";
+
+type MovementLike = {
+  type: string;
+  product_id: string | null;
+  from_warehouse_id: string | null;
+  to_warehouse_id: string | null;
+  qty: number;
+};
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+function isManualType(t: string): t is ManualType {
+  return t === "IN" || t === "OUT" || t === "TRANSFER";
+}
+
+function validateManualPayload(params: {
+  type: string;
+  productId: string | null | undefined;
+  qty: number;
+  fromId: string | null;
+  toId: string | null;
+}): string | null {
+  const { type, productId, qty, fromId, toId } = params;
+  if (!isManualType(type) || !productId || !Number.isFinite(qty) || qty <= 0) {
+    return "Payload mutasi tidak lengkap";
+  }
+  if (type === "IN" && !toId) return "Pilih gudang tujuan";
+  if (type === "OUT" && !fromId) return "Pilih gudang asal";
+  if (type === "TRANSFER") {
+    if (!fromId || !toId) return "Pilih gudang asal dan tujuan";
+    if (fromId === toId) return "Gudang asal dan tujuan harus berbeda";
+  }
+  return null;
+}
+
+/** Δ stock at warehouse; negative deducts (needs enough qty). */
+async function adjustStock(
+  admin: SupabaseClient,
+  productId: string,
+  warehouseId: string,
+  delta: number
+): Promise<string | null> {
+  if (!warehouseId || delta === 0) return null;
+
+  const { error: upsertErr } = await admin.from("warehouse_stocks").upsert(
+    { warehouse_id: warehouseId, product_id: productId, qty: 0 },
+    { onConflict: "warehouse_id,product_id", ignoreDuplicates: true }
+  );
+  if (upsertErr) return upsertErr.message;
+
+  const { data: row, error: readErr } = await admin
+    .from("warehouse_stocks")
+    .select("qty")
+    .eq("warehouse_id", warehouseId)
+    .eq("product_id", productId)
+    .maybeSingle();
+
+  if (readErr) return readErr.message;
+  const current = Number(row?.qty ?? 0);
+  const next = current + delta;
+  if (next < 0) {
+    return "Stok tidak cukup untuk koreksi mutasi ini";
+  }
+
+  const { error: updErr } = await admin
+    .from("warehouse_stocks")
+    .update({ qty: next })
+    .eq("warehouse_id", warehouseId)
+    .eq("product_id", productId);
+
+  return updErr ? updErr.message : null;
+}
+
+/** Undo effect of a manual movement on warehouse_stocks (no new log row). */
+async function reverseManualStock(
+  admin: SupabaseClient,
+  m: MovementLike
+): Promise<string | null> {
+  if (!m.product_id || !Number.isFinite(m.qty) || m.qty <= 0) {
+    return "Data mutasi tidak valid";
+  }
+  if (m.type === "IN") {
+    if (!m.to_warehouse_id) return "Gudang tujuan mutasi tidak valid";
+    return adjustStock(admin, m.product_id, m.to_warehouse_id, -m.qty);
+  }
+  if (m.type === "OUT") {
+    if (!m.from_warehouse_id) return "Gudang asal mutasi tidak valid";
+    return adjustStock(admin, m.product_id, m.from_warehouse_id, m.qty);
+  }
+  if (m.type === "TRANSFER") {
+    if (!m.from_warehouse_id || !m.to_warehouse_id) {
+      return "Gudang mutasi pindah tidak valid";
+    }
+    const errTo = await adjustStock(
+      admin,
+      m.product_id,
+      m.to_warehouse_id,
+      -m.qty
+    );
+    if (errTo) return errTo;
+    const errFrom = await adjustStock(
+      admin,
+      m.product_id,
+      m.from_warehouse_id,
+      m.qty
+    );
+    if (errFrom) {
+      // best-effort re-apply to side
+      await adjustStock(admin, m.product_id, m.to_warehouse_id, m.qty);
+      return errFrom;
+    }
+    return null;
+  }
+  return "Tipe mutasi tidak bisa dikoreksi di sini";
+}
+
+/** Apply effect of a manual movement on warehouse_stocks (no new log row). */
+async function applyManualStock(
+  admin: SupabaseClient,
+  m: MovementLike
+): Promise<string | null> {
+  if (!m.product_id || !Number.isFinite(m.qty) || m.qty <= 0) {
+    return "Data mutasi tidak valid";
+  }
+  if (m.type === "IN") {
+    if (!m.to_warehouse_id) return "Gudang tujuan wajib";
+    return adjustStock(admin, m.product_id, m.to_warehouse_id, m.qty);
+  }
+  if (m.type === "OUT") {
+    if (!m.from_warehouse_id) return "Gudang asal wajib";
+    return adjustStock(admin, m.product_id, m.from_warehouse_id, -m.qty);
+  }
+  if (m.type === "TRANSFER") {
+    if (!m.from_warehouse_id || !m.to_warehouse_id) {
+      return "Gudang asal dan tujuan wajib";
+    }
+    const errFrom = await adjustStock(
+      admin,
+      m.product_id,
+      m.from_warehouse_id,
+      -m.qty
+    );
+    if (errFrom) return errFrom;
+    const errTo = await adjustStock(
+      admin,
+      m.product_id,
+      m.to_warehouse_id,
+      m.qty
+    );
+    if (errTo) {
+      await adjustStock(admin, m.product_id, m.from_warehouse_id, m.qty);
+      return errTo;
+    }
+    return null;
+  }
+  return "Tipe mutasi tidak valid";
 }
 
 Deno.serve(async (req) => {
@@ -156,33 +316,14 @@ Deno.serve(async (req) => {
     const referenceId =
       (body.referenceId as string | null | undefined) || null;
 
-    if (
-      !type ||
-      !["IN", "OUT", "TRANSFER"].includes(type) ||
-      !productId ||
-      !Number.isFinite(qty) ||
-      qty <= 0
-    ) {
-      return json({ message: "Payload mutasi tidak lengkap" }, 400);
-    }
-
-    if (type === "IN" && !toId) {
-      return json({ message: "Pilih gudang tujuan" }, 400);
-    }
-    if (type === "OUT" && !fromId) {
-      return json({ message: "Pilih gudang asal" }, 400);
-    }
-    if (type === "TRANSFER") {
-      if (!fromId || !toId) {
-        return json({ message: "Pilih gudang asal dan tujuan" }, 400);
-      }
-      if (fromId === toId) {
-        return json(
-          { message: "Gudang asal dan tujuan harus berbeda" },
-          400
-        );
-      }
-    }
+    const validErr = validateManualPayload({
+      type: type || "",
+      productId,
+      qty,
+      fromId,
+      toId,
+    });
+    if (validErr) return json({ message: validErr }, 400);
 
     const { error } = await admin.rpc("apply_stock_change", {
       p_type: type,
@@ -198,6 +339,166 @@ Deno.serve(async (req) => {
 
     if (error) {
       return json({ message: error.message }, 400);
+    }
+
+    return json({ success: true });
+  }
+
+  if (body?.action === "delete_movement") {
+    if (!role || (role !== "OWNER" && role !== "GUDANG")) {
+      return json(
+        { message: "Hanya Owner atau Gudang yang bisa hapus riwayat mutasi" },
+        403
+      );
+    }
+
+    const movementId = body.movementId as string | undefined;
+    if (!movementId) {
+      return json({ message: "movementId wajib" }, 400);
+    }
+
+    const { data: movement, error: readErr } = await admin
+      .from("stock_movements")
+      .select(
+        "id, type, product_id, from_warehouse_id, to_warehouse_id, qty"
+      )
+      .eq("id", movementId)
+      .maybeSingle();
+
+    if (readErr) return json({ message: readErr.message }, 400);
+    if (!movement) {
+      return json({ message: "Riwayat mutasi tidak ditemukan" }, 404);
+    }
+    if (!isManualType(movement.type)) {
+      return json(
+        {
+          message:
+            "Mutasi penjualan/batal tidak bisa dihapus di sini. Batalkan lewat transaksi.",
+        },
+        400
+      );
+    }
+
+    const revErr = await reverseManualStock(admin, {
+      type: movement.type,
+      product_id: movement.product_id,
+      from_warehouse_id: movement.from_warehouse_id,
+      to_warehouse_id: movement.to_warehouse_id,
+      qty: Number(movement.qty),
+    });
+    if (revErr) return json({ message: revErr }, 400);
+
+    const { error: delErr } = await admin
+      .from("stock_movements")
+      .delete()
+      .eq("id", movementId);
+
+    if (delErr) {
+      // best-effort re-apply so stock matches remaining log
+      await applyManualStock(admin, {
+        type: movement.type,
+        product_id: movement.product_id,
+        from_warehouse_id: movement.from_warehouse_id,
+        to_warehouse_id: movement.to_warehouse_id,
+        qty: Number(movement.qty),
+      });
+      return json({ message: delErr.message }, 400);
+    }
+
+    return json({ success: true });
+  }
+
+  if (body?.action === "edit_movement") {
+    if (!role || (role !== "OWNER" && role !== "GUDANG")) {
+      return json(
+        { message: "Hanya Owner atau Gudang yang bisa edit riwayat mutasi" },
+        403
+      );
+    }
+
+    const movementId = body.movementId as string | undefined;
+    if (!movementId) {
+      return json({ message: "movementId wajib" }, 400);
+    }
+
+    const type = body.type as string | undefined;
+    const productId = body.productId as string | undefined;
+    const qty = Number(body.qty);
+    const fromId = (body.fromWarehouseId as string | null | undefined) || null;
+    const toId = (body.toWarehouseId as string | null | undefined) || null;
+    const note = (body.note as string | null | undefined)?.trim() || null;
+
+    const validErr = validateManualPayload({
+      type: type || "",
+      productId,
+      qty,
+      fromId,
+      toId,
+    });
+    if (validErr) return json({ message: validErr }, 400);
+
+    const { data: old, error: readErr } = await admin
+      .from("stock_movements")
+      .select(
+        "id, type, product_id, from_warehouse_id, to_warehouse_id, qty"
+      )
+      .eq("id", movementId)
+      .maybeSingle();
+
+    if (readErr) return json({ message: readErr.message }, 400);
+    if (!old) {
+      return json({ message: "Riwayat mutasi tidak ditemukan" }, 404);
+    }
+    if (!isManualType(old.type)) {
+      return json(
+        {
+          message:
+            "Mutasi penjualan/batal tidak bisa diedit di sini. Batalkan lewat transaksi.",
+        },
+        400
+      );
+    }
+
+    const oldLike: MovementLike = {
+      type: old.type,
+      product_id: old.product_id,
+      from_warehouse_id: old.from_warehouse_id,
+      to_warehouse_id: old.to_warehouse_id,
+      qty: Number(old.qty),
+    };
+    const newLike: MovementLike = {
+      type: type as ManualType,
+      product_id: productId!,
+      from_warehouse_id: type === "IN" ? null : fromId,
+      to_warehouse_id: type === "OUT" ? null : toId,
+      qty,
+    };
+
+    const revErr = await reverseManualStock(admin, oldLike);
+    if (revErr) return json({ message: revErr }, 400);
+
+    const appErr = await applyManualStock(admin, newLike);
+    if (appErr) {
+      await applyManualStock(admin, oldLike);
+      return json({ message: appErr }, 400);
+    }
+
+    const { error: updErr } = await admin
+      .from("stock_movements")
+      .update({
+        type: newLike.type,
+        product_id: newLike.product_id,
+        from_warehouse_id: newLike.from_warehouse_id,
+        to_warehouse_id: newLike.to_warehouse_id,
+        qty: newLike.qty,
+        note,
+      })
+      .eq("id", movementId);
+
+    if (updErr) {
+      await reverseManualStock(admin, newLike);
+      await applyManualStock(admin, oldLike);
+      return json({ message: updErr.message }, 400);
     }
 
     return json({ success: true });

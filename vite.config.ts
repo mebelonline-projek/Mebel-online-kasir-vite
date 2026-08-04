@@ -13,7 +13,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: "autoUpdate",
+      // Register sederhana (tanpa auto-reload client) — hindari blank putih loop
+      registerType: "prompt",
+      injectRegister: "script",
       includeAssets: [
         "favicon-32.png",
         "logo.png",
@@ -76,8 +78,10 @@ export default defineConfig({
       workbox: {
         navigateFallback: "/index.html",
         cleanupOutdatedCaches: true,
-        clientsClaim: true,
-        skipWaiting: true,
+        // Jangan claim/skipWaiting saat install — biar tab yang buka
+        // tidak kehilangan aset hash lama (blank putih mid-session).
+        clientsClaim: false,
+        skipWaiting: false,
         runtimeCaching: [
           {
             // Multi-device: jangan sajikan REST usang. Dexie handle offline UI.

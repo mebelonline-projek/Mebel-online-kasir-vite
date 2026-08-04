@@ -6,6 +6,7 @@ import {
   type CachedWarehouse,
 } from "@/lib/offline-db";
 import { supabase } from "@/lib/supabase";
+import { fetchAllRows } from "@/lib/supabase-fetch-all";
 
 export function getStockQty(
   stocks: CachedStock[],
@@ -22,29 +23,36 @@ export function getStockQty(
 export async function refreshCatalogCache(): Promise<void> {
   if (!offlineDb || !navigator.onLine) return;
 
-  const [customersRes, productsRes, warehousesRes, stocksRes] =
+  const [customersRes, productsResult, warehousesRes, stocksResult] =
     await Promise.all([
       supabase
         .from("customers")
         .select("id, name, phone")
         .order("name")
         .limit(200),
-      supabase
-        .from("products")
-        .select(
-          "id, name, category, base_price, unit, parent_id, warna, ukuran, min_stock"
-        )
-        .order("name")
-        .limit(500),
+      fetchAllRows(async (from, to) =>
+        supabase
+          .from("products")
+          .select(
+            "id, name, category, base_price, unit, parent_id, warna, ukuran, min_stock"
+          )
+          .order("name")
+          .order("id")
+          .range(from, to)
+      ),
       supabase
         .from("warehouses")
         .select("id, name, is_active, is_sales_warehouse")
         .eq("is_active", true)
         .order("name"),
-      supabase
-        .from("warehouse_stocks")
-        .select("warehouse_id, product_id, qty")
-        .limit(2000),
+      fetchAllRows(async (from, to) =>
+        supabase
+          .from("warehouse_stocks")
+          .select("warehouse_id, product_id, qty")
+          .order("warehouse_id")
+          .order("product_id")
+          .range(from, to)
+      ),
     ]);
 
   const now = Date.now();
@@ -60,8 +68,8 @@ export async function refreshCatalogCache(): Promise<void> {
     if (rows.length) await offlineDb.cachedCustomers.bulkPut(rows);
   }
 
-  if (productsRes.data) {
-    const rows: CachedProduct[] = productsRes.data.map((p) => ({
+  if (!productsResult.error) {
+    const rows: CachedProduct[] = productsResult.data.map((p) => ({
       id: p.id as string,
       name: p.name as string,
       category: (p.category as string) || "-",
@@ -89,8 +97,8 @@ export async function refreshCatalogCache(): Promise<void> {
     if (rows.length) await offlineDb.cachedWarehouses.bulkPut(rows);
   }
 
-  if (stocksRes.data) {
-    const rows: CachedStock[] = stocksRes.data.map((s) => ({
+  if (!stocksResult.error) {
+    const rows: CachedStock[] = stocksResult.data.map((s) => ({
       id: `${s.warehouse_id as string}:${s.product_id as string}`,
       warehouse_id: s.warehouse_id as string,
       product_id: s.product_id as string,

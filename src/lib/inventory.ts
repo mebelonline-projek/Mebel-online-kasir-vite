@@ -2,6 +2,7 @@ import type { ActionState } from "@/types/common";
 import { supabase } from "@/lib/supabase";
 import { refreshCatalogCache } from "@/lib/catalog-cache";
 import { processProductPhoto } from "@/lib/image-process";
+import { fetchAllRows } from "@/lib/supabase-fetch-all";
 import { dbId } from "@/lib/validation";
 import { z } from "zod";
 
@@ -285,16 +286,20 @@ export async function getCategories(): Promise<ActionState<CategoryRow[]>> {
 export async function getInventoryProducts(): Promise<
   ActionState<InventoryProductRow[]>
 > {
-  const { data, error } = await supabase
-    .from("products")
-    .select(
-      "id, name, category_id, category, base_price, unit, min_stock, photo_url, description, created_at, parent_id, warna, ukuran"
-    )
-    .order("name");
-  if (error) return { success: false, message: error.message };
+  const { data, error } = await fetchAllRows(async (from, to) =>
+    supabase
+      .from("products")
+      .select(
+        "id, name, category_id, category, base_price, unit, min_stock, photo_url, description, created_at, parent_id, warna, ukuran"
+      )
+      .order("name")
+      .order("id")
+      .range(from, to)
+  );
+  if (error) return { success: false, message: error };
   return {
     success: true,
-    data: (data || []).map((p) => ({
+    data: data.map((p) => ({
       ...p,
       base_price: Number(p.base_price),
       unit: p.unit || "pcs",
@@ -307,13 +312,18 @@ export async function getInventoryProducts(): Promise<
 }
 
 export async function getWarehouseStocks(): Promise<ActionState<StockRow[]>> {
-  const { data, error } = await supabase
-    .from("warehouse_stocks")
-    .select("warehouse_id, product_id, qty");
-  if (error) return { success: false, message: error.message };
+  const { data, error } = await fetchAllRows(async (from, to) =>
+    supabase
+      .from("warehouse_stocks")
+      .select("warehouse_id, product_id, qty")
+      .order("warehouse_id")
+      .order("product_id")
+      .range(from, to)
+  );
+  if (error) return { success: false, message: error };
   return {
     success: true,
-    data: (data || []).map((s) => ({
+    data: data.map((s) => ({
       warehouse_id: s.warehouse_id,
       product_id: s.product_id,
       qty: Number(s.qty),
@@ -321,18 +331,91 @@ export async function getWarehouseStocks(): Promise<ActionState<StockRow[]>> {
   };
 }
 
+export type MovementTypeFilter =
+  | "ALL"
+  | "IN"
+  | "OUT"
+  | "TRANSFER"
+  | "SALE"
+  | "VOID_RESTORE";
+
+export type StockMovementsListResult = {
+  movements: MovementRow[];
+  total: number;
+  totalPages: number;
+  page: number;
+  limit: number;
+};
+
+function sanitizeSearchTerm(q: string): string {
+  return q.replace(/[%_,.()"'\\]/g, " ").trim().slice(0, 80);
+}
+
 export async function getStockMovements(
-  limit = 50
-): Promise<ActionState<MovementRow[]>> {
-  const { data, error } = await supabase
+  params: {
+    page?: number;
+    limit?: number;
+    type?: MovementTypeFilter;
+    q?: string;
+  } = {}
+): Promise<ActionState<StockMovementsListResult>> {
+  const page = Math.max(1, params.page ?? 1);
+  const limit = Math.min(50, Math.max(1, params.limit ?? 20));
+  const offset = (page - 1) * limit;
+  const type = params.type ?? "ALL";
+  const q = sanitizeSearchTerm(params.q || "");
+
+  let productIds: string[] = [];
+  if (q) {
+    const pattern = `%${q}%`;
+    const [byName, byWarna, byUkuran] = await Promise.all([
+      supabase.from("products").select("id").ilike("name", pattern),
+      supabase.from("products").select("id").ilike("warna", pattern),
+      supabase.from("products").select("id").ilike("ukuran", pattern),
+    ]);
+    const set = new Set<string>();
+    for (const res of [byName, byWarna, byUkuran]) {
+      for (const row of res.data || []) set.add(row.id);
+    }
+    productIds = [...set];
+  }
+
+  let query = supabase
     .from("stock_movements")
     .select(
-      "id, type, product_id, from_warehouse_id, to_warehouse_id, qty, note, created_at, created_by"
+      "id, type, product_id, from_warehouse_id, to_warehouse_id, qty, note, created_at, created_by",
+      { count: "exact" }
     )
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .order("created_at", { ascending: false });
+
+  if (type !== "ALL") {
+    query = query.eq("type", type);
+  }
+
+  if (q) {
+    const notePattern = `%${q}%`;
+    if (productIds.length > 0) {
+      const idList = productIds.slice(0, 100).join(",");
+      query = query.or(`note.ilike."${notePattern}",product_id.in.(${idList})`);
+    } else {
+      query = query.ilike("note", notePattern);
+    }
+  }
+
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
   if (error) return { success: false, message: error.message };
-  return { success: true, data: (data || []) as MovementRow[] };
+
+  const total = count || 0;
+  return {
+    success: true,
+    data: {
+      movements: (data || []) as MovementRow[],
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      page,
+      limit,
+    },
+  };
 }
 
 export async function getInventoryBundle(): Promise<
@@ -341,19 +424,16 @@ export async function getInventoryBundle(): Promise<
     categories: CategoryRow[];
     products: InventoryProductRow[];
     stocks: StockRow[];
-    movements: MovementRow[];
   }>
 > {
-  const [warehouses, categories, products, stocks, movements] =
-    await Promise.all([
-      getWarehouses(),
-      getCategories(),
-      getInventoryProducts(),
-      getWarehouseStocks(),
-      getStockMovements(),
-    ]);
+  const [warehouses, categories, products, stocks] = await Promise.all([
+    getWarehouses(),
+    getCategories(),
+    getInventoryProducts(),
+    getWarehouseStocks(),
+  ]);
 
-  for (const r of [warehouses, categories, products, stocks, movements]) {
+  for (const r of [warehouses, categories, products, stocks]) {
     if (!r.success) {
       return { success: false, message: r.message || "Gagal memuat inventori" };
     }
@@ -366,7 +446,6 @@ export async function getInventoryBundle(): Promise<
       categories: categories.data!,
       products: products.data!,
       stocks: stocks.data!,
-      movements: movements.data!,
     },
   };
 }
@@ -1263,6 +1342,131 @@ export async function createStockMovement(
       toWarehouseId: toId,
       note: d.note?.trim() || null,
     });
+  } catch (e) {
+    return {
+      success: false,
+      message: e instanceof Error ? e.message : "Terjadi kesalahan",
+    };
+  }
+}
+
+function resolveStockEdgeUrl(): string | null {
+  return (
+    (import.meta.env.VITE_EDGE_APPLY_SALE_STOCK_URL as string | undefined)?.trim() ||
+    null
+  );
+}
+
+async function postStockEdge(
+  body: Record<string, unknown>
+): Promise<ActionState> {
+  const stockUrl = resolveStockEdgeUrl();
+  if (!stockUrl) {
+    return {
+      success: false,
+      message:
+        "Mutasi stok belum aktif (set VITE_EDGE_APPLY_SALE_STOCK_URL + deploy Edge)",
+    };
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    return { success: false, message: "Anda harus login" };
+  }
+
+  const res = await fetch(stockUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const resBody = (await res.json().catch(() => ({}))) as { message?: string };
+  if (!res.ok) {
+    return {
+      success: false,
+      message: resBody.message || "Gagal memproses mutasi stok",
+    };
+  }
+  await afterInventoryWrite();
+  return { success: true };
+}
+
+export async function deleteStockMovement(id: string): Promise<ActionState> {
+  try {
+    const auth = await requireInventoryWriter();
+    if (!auth.ok) return { success: false, message: auth.message };
+    const parsedId = dbId().safeParse(id);
+    if (!parsedId.success) {
+      return { success: false, message: "ID mutasi tidak valid" };
+    }
+
+    const result = await postStockEdge({
+      action: "delete_movement",
+      movementId: parsedId.data,
+    });
+    if (!result.success) return result;
+    return { success: true, message: "Riwayat mutasi dihapus" };
+  } catch (e) {
+    return {
+      success: false,
+      message: e instanceof Error ? e.message : "Terjadi kesalahan",
+    };
+  }
+}
+
+export async function updateStockMovement(
+  id: string,
+  input: MovementFormValues
+): Promise<ActionState> {
+  try {
+    const auth = await requireInventoryWriter();
+    if (!auth.ok) return { success: false, message: auth.message };
+    const parsedId = dbId().safeParse(id);
+    if (!parsedId.success) {
+      return { success: false, message: "ID mutasi tidak valid" };
+    }
+    const parsed = movementSchema.safeParse(input);
+    if (!parsed.success) return { success: false, message: "Validasi gagal" };
+
+    const d = parsed.data;
+    const fromId = d.from_warehouse_id || null;
+    const toId = d.to_warehouse_id || null;
+
+    if (d.type === "IN" && !toId) {
+      return { success: false, message: "Pilih gudang tujuan" };
+    }
+    if (d.type === "OUT" && !fromId) {
+      return { success: false, message: "Pilih gudang asal" };
+    }
+    if (d.type === "TRANSFER") {
+      if (!fromId || !toId) {
+        return { success: false, message: "Pilih gudang asal dan tujuan" };
+      }
+      if (fromId === toId) {
+        return {
+          success: false,
+          message: "Gudang asal dan tujuan harus berbeda",
+        };
+      }
+    }
+
+    const result = await postStockEdge({
+      action: "edit_movement",
+      movementId: parsedId.data,
+      type: d.type,
+      productId: d.product_id,
+      qty: d.qty,
+      fromWarehouseId: fromId,
+      toWarehouseId: toId,
+      note: d.note?.trim() || null,
+    });
+    if (!result.success) return result;
+    return { success: true, message: "Riwayat mutasi diperbarui" };
   } catch (e) {
     return {
       success: false,

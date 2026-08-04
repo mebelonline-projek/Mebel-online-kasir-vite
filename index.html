@@ -28,6 +28,46 @@
         } catch (e) {}
       }();
     </script>
+    <!-- Lepas SW macet / reload beruntun tanpa butuh app bundle -->
+    <script>
+      !function () {
+        try {
+          var k = "__pwa_boot_n";
+          var n = Number(sessionStorage.getItem(k) || "0") + 1;
+          sessionStorage.setItem(k, String(n));
+          setTimeout(function () {
+            try {
+              sessionStorage.setItem(k, "0");
+            } catch (e) {}
+          }, 6000);
+          if (n < 3) return;
+          sessionStorage.setItem(k, "0");
+          var done = function () {
+            location.reload();
+          };
+          var tasks = [];
+          if ("serviceWorker" in navigator) {
+            tasks.push(
+              navigator.serviceWorker.getRegistrations().then(function (rs) {
+                return Promise.all(rs.map(function (r) {
+                  return r.unregister();
+                }));
+              })
+            );
+          }
+          if ("caches" in window) {
+            tasks.push(
+              caches.keys().then(function (keys) {
+                return Promise.all(keys.map(function (key) {
+                  return caches.delete(key);
+                }));
+              })
+            );
+          }
+          Promise.all(tasks).then(done).catch(done);
+        } catch (e) {}
+      }();
+    </script>
   </head>
   <body>
     <div id="root"></div>
