@@ -347,6 +347,38 @@ export function isWebSerialSupported(): boolean {
   return typeof navigator !== "undefined" && "serial" in navigator;
 }
 
+/** RawBT hanya di Android. */
+export function isAndroidClient(): boolean {
+  return typeof navigator !== "undefined" && /Android/i.test(navigator.userAgent);
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Cetak ESC/POS lewat app RawBT (Android Chrome).
+ * Intent scheme: jika RawBT belum ada, Chrome buka Play Store.
+ * @see https://rawbt.ru/start.html
+ */
+export function printViaRawBt(payload: Uint8Array): void {
+  const b64 = bytesToBase64(payload);
+  // Intent → Play Store jika RawBT belum terpasang. Data = base64 ESC/POS.
+  const intentUrl =
+    `intent:base64,${b64}` +
+    "#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end";
+  try {
+    window.location.href = intentUrl;
+  } catch {
+    window.location.href = `rawbt:base64,${b64}`;
+  }
+}
+
 type SerialPortLike = {
   open: (options: {
     baudRate: number;

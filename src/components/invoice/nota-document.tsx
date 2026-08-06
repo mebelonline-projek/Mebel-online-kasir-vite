@@ -16,7 +16,9 @@ import {
 import {
   buildThermalNotaEscPos,
   downloadEscPosFile,
+  isAndroidClient,
   isWebSerialSupported,
+  printViaRawBt,
   printViaWebSerial,
 } from "@/lib/thermal-escpos";
 
@@ -73,10 +75,12 @@ export function NotaDocument({
   const [printingThermal, setPrintingThermal] = useState(false);
   const [serialOk, setSerialOk] = useState(false);
   const [mobileClient, setMobileClient] = useState(false);
+  const [androidClient, setAndroidClient] = useState(false);
 
   useEffect(() => {
     setSerialOk(isWebSerialSupported());
     setMobileClient(isMobilePrintClient());
+    setAndroidClient(isAndroidClient());
   }, []);
 
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
@@ -118,8 +122,15 @@ export function NotaDocument({
       payments,
     });
 
-  /** Dialog sistem (POS-58). Jika kertas kosong, pakai Cetak Thermal ESC/POS. */
+  /** Dialog sistem — di Android sering "layanan cetak dinonaktifkan". */
   const handlePrintNota = () => {
+    if (androidClient || (!serialOk && mobileClient)) {
+      toast.message(
+        'Peringatan "layanan cetak dinonaktifkan" = dialog Android, bukan bug app. Pakai Cetak Thermal (RawBT), bukan Cetak Sistem.',
+        { duration: 12000 },
+      );
+      return;
+    }
     try {
       printNotaHtml({
         store_name,
@@ -158,7 +169,16 @@ export function NotaDocument({
   const handleThermalPrint = async () => {
     setPrintingThermal(true);
     try {
-      await printViaWebSerial(buildEscPosPayload());
+      const payload = buildEscPosPayload();
+      if (androidClient || (!serialOk && mobileClient)) {
+        printViaRawBt(payload);
+        toast.message(
+          "Membuka RawBT. Pastikan app terpasang, printer Bluetooth sudah di-pair di RawBT, lalu cetak.",
+          { duration: 10000 },
+        );
+        return;
+      }
+      await printViaWebSerial(payload);
       toast.success("Nota dikirim ke printer thermal");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
@@ -166,7 +186,9 @@ export function NotaDocument({
         toast.message("Pemilihan printer dibatalkan");
       } else {
         toast.error(
-          "Gagal cetak thermal. Pilih port COM/USB printer di dialog Chrome.",
+          androidClient
+            ? "Gagal buka RawBT. Install RawBT dari Play Store, lalu coba lagi."
+            : "Gagal cetak thermal. Pilih port COM/USB printer di dialog Chrome.",
         );
       }
     } finally {
@@ -181,7 +203,7 @@ export function NotaDocument({
         `NOTA-${transaction_number}.bin`,
       );
       toast.message(
-        "File .bin diunduh. Di Android buka dengan RawBT / app printer ESC/POS.",
+        "File .bin diunduh. Buka dengan RawBT jika intent cetak gagal.",
         { duration: 9000 },
       );
     } catch {
@@ -204,34 +226,44 @@ export function NotaDocument({
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali
         </Button>
-        {serialOk && (
+        {(serialOk || androidClient || mobileClient) && (
           <Button
             size="sm"
             onClick={() => void handleThermalPrint()}
             disabled={printingThermal}
             className="gap-1"
-            title="Kirim ESC/POS langsung — cocok jika Cetak Nota menghasilkan kertas kosong"
+            title={
+              androidClient || (!serialOk && mobileClient)
+                ? "Cetak via RawBT (Bluetooth Android)"
+                : "Kirim ESC/POS via Web Serial (Chrome PC)"
+            }
           >
             <Usb className="h-3.5 w-3.5" />
-            {printingThermal ? "Mencetak..." : "Cetak Thermal"}
+            {printingThermal
+              ? "Menyiapkan..."
+              : androidClient || (!serialOk && mobileClient)
+                ? "Cetak Thermal"
+                : "Cetak Thermal"}
           </Button>
         )}
-        <Button
-          size="sm"
-          variant={serialOk ? "outline" : "default"}
-          onClick={() => handlePrintNota()}
-          className="gap-1"
-          title="Dialog cetak Windows/Chrome ke POS-58"
-        >
-          <Printer className="h-3.5 w-3.5" />
-          Cetak Nota
-        </Button>
+        {!androidClient && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handlePrintNota()}
+            className="gap-1"
+            title="Dialog cetak sistem (sering gagal di POS-58)"
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Cetak Sistem
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
           onClick={() => handleDownloadEscPos()}
           className="gap-1"
-          title="Unduh perintah ESC/POS untuk RawBT / app printer"
+          title="Unduh ESC/POS untuk RawBT"
         >
           <Download className="h-3.5 w-3.5" />
           File Thermal
@@ -248,23 +280,30 @@ export function NotaDocument({
         </Button>
       </div>
       <p className="mb-4 text-center text-xs text-muted-foreground">
-        {serialOk ? (
+        {androidClient || (!serialOk && mobileClient) ? (
           <>
-            Kertas keluar tapi kosong? Pakai{" "}
-            <span className="font-medium">Cetak Thermal</span> (USB/COM). Dialog
-            Windows sering tidak menggambar teks di POS-58.
+            Di Android jangan pakai Cetak Sistem (peringatan layanan cetak).
+            Install{" "}
+            <a
+              className="font-medium underline underline-offset-2"
+              href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter"
+              target="_blank"
+              rel="noreferrer"
+            >
+              RawBT
+            </a>
+            , pair printer Bluetooth di app itu, lalu ketuk{" "}
+            <span className="font-medium">Cetak Thermal</span>.
           </>
-        ) : mobileClient ? (
+        ) : serialOk ? (
           <>
-            Di HP: unduh <span className="font-medium">File Thermal</span> lalu
-            buka dengan RawBT. Atau Cetak Nota → Bluetooth (hasil tergantung
-            driver).
+            Laptop: pakai <span className="font-medium">Cetak Thermal</span>{" "}
+            (USB/COM). Cetak Sistem sering kertas kosong di POS-58.
           </>
         ) : (
           <>
-            Sambungkan printer USB di Chrome PC agar tombol{" "}
-            <span className="font-medium">Cetak Thermal</span> muncul — paling
-            andal untuk POS-58.
+            Sambungkan printer di Chrome PC agar Cetak Thermal muncul, atau di
+            HP pakai RawBT.
           </>
         )}
       </p>
