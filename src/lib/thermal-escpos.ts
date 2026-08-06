@@ -226,7 +226,9 @@ export function downloadEscPosFile(
   payload: Uint8Array,
   filename: string,
 ): void {
-  const blob = new Blob([payload], { type: "application/octet-stream" });
+  const copy = new Uint8Array(payload.byteLength);
+  copy.set(payload);
+  const blob = new Blob([copy], { type: "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
