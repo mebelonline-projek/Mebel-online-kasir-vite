@@ -16,7 +16,6 @@ import {
 import {
   buildThermalNotaEscPos,
   downloadBlobFile,
-  downloadEscPosFile,
   isAndroidClient,
   isWebSerialSupported,
   printViaWebSerial,
@@ -95,26 +94,13 @@ export function NotaDocument({
   const handleSavePdf = async () => {
     setSavingPdf(true);
     try {
-      // Thermer: PDF 58mm tampak kecil. Di Android unduh PNG penuh lebar.
-      if (androidClient || mobileClient) {
-        const blob = await renderThermalNotaPngBlob(buildThermalInput());
-        downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
-        toast.success(
-          "Gambar nota diunduh (PNG). Buka di Thermer — PDF sempit hasilnya kecil.",
-        );
-        return;
-      }
       const pdfData = await buildNotaPdfData(transaction_id);
       if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
       const blob = await renderNotaPdfBlob(pdfData);
       downloadBlob(blob, `NOTA-${transaction_number}.pdf`);
       toast.success("Nota berhasil disimpan sebagai PDF");
     } catch {
-      toast.error(
-        androidClient || mobileClient
-          ? "Gagal mengunduh gambar nota"
-          : "Gagal menyimpan nota sebagai PDF",
-      );
+      toast.error("Gagal menyimpan nota sebagai PDF");
     } finally {
       setSavingPdf(false);
     }
@@ -143,8 +129,8 @@ export function NotaDocument({
   const handlePrintNota = () => {
     if (androidClient || (!serialOk && mobileClient)) {
       toast.message(
-        'Peringatan "layanan cetak dinonaktifkan" = dialog Android. Pakai Cetak Thermal (bagikan gambar ke app printer gratis).',
-        { duration: 12000 },
+        "Di HP pakai Cetak Thermal atau Unduh Gambar ke Thermer.",
+        { duration: 8000 },
       );
       return;
     }
@@ -174,12 +160,12 @@ export function NotaDocument({
       });
       toast.message(
         serialOk
-          ? "Jika kertas kosong: batalkan, lalu pakai Cetak Thermal (ESC/POS)."
-          : "POS-58: kertas 58mm, skala 100%. Jika kertas kosong, driver tidak cocok — pakai USB + Cetak Thermal di Chrome PC.",
-        { duration: 10000 },
+          ? "Jika kertas kosong: batalkan, lalu pakai Cetak Thermal."
+          : "POS-58: kertas 58mm, skala 100%.",
+        { duration: 8000 },
       );
     } catch {
-      toast.error("Gagal membuka dialog cetak. Coba hard refresh lalu ulang.");
+      toast.error("Gagal membuka dialog cetak.");
     }
   };
 
@@ -192,15 +178,13 @@ export function NotaDocument({
           `NOTA-${transaction_number}.png`,
         );
         if (mode === "shared") {
-          toast.message(
-            "Pilih app printer gratis (mis. Thermal Printer BT / PrinterMax), pair Bluetooth, lalu cetak gambar.",
-            { duration: 12000 },
-          );
+          toast.message("Pilih Thermer (atau app printer BT), lalu cetak.", {
+            duration: 9000,
+          });
         } else {
-          toast.message(
-            "Gambar nota diunduh. Buka dengan app printer Bluetooth gratis, lalu cetak.",
-            { duration: 10000 },
-          );
+          toast.message("Gambar diunduh. Buka di Thermer lalu cetak.", {
+            duration: 8000,
+          });
         }
         return;
       }
@@ -215,8 +199,8 @@ export function NotaDocument({
       } else {
         toast.error(
           androidClient || mobileClient
-            ? "Gagal menyiapkan gambar nota. Coba lagi."
-            : "Gagal cetak thermal. Pilih port COM/USB printer di dialog Chrome.",
+            ? "Gagal menyiapkan gambar nota."
+            : "Gagal cetak thermal. Pilih port COM/USB di Chrome.",
         );
       }
     } finally {
@@ -224,25 +208,20 @@ export function NotaDocument({
     }
   };
 
-  const handleDownloadEscPos = async () => {
+  const handleDownloadGambar = async () => {
+    setSavingPdf(true);
     try {
-      if (androidClient || mobileClient) {
-        const blob = await renderThermalNotaPngBlob(buildThermalInput());
-        downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
-        toast.success("Gambar nota diunduh (PNG)");
-        return;
-      }
-      downloadEscPosFile(
-        buildEscPosPayload(),
-        `NOTA-${transaction_number}.bin`,
-      );
-      toast.message("File .bin diunduh untuk app ESC/POS.", {
-        duration: 7000,
-      });
+      const blob = await renderThermalNotaPngBlob(buildThermalInput());
+      downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
+      toast.success("Gambar nota diunduh. Buka di Thermer untuk cetak.");
     } catch {
-      toast.error("Gagal membuat file thermal");
+      toast.error("Gagal mengunduh gambar nota");
+    } finally {
+      setSavingPdf(false);
     }
   };
+
+  const isPhone = androidClient || (!serialOk && mobileClient);
 
   return (
     <div className="bg-background text-foreground">
@@ -259,81 +238,71 @@ export function NotaDocument({
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali
         </Button>
-        {(serialOk || androidClient || mobileClient) && (
+        {(serialOk || isPhone) && (
           <Button
             size="sm"
             onClick={() => void handleThermalPrint()}
             disabled={printingThermal}
             className="gap-1"
             title={
-              androidClient || (!serialOk && mobileClient)
-                ? "Bagikan gambar nota ke app printer Bluetooth gratis"
-                : "Kirim ESC/POS via Web Serial (Chrome PC)"
+              isPhone
+                ? "Bagikan ke Thermer / app printer"
+                : "ESC/POS via USB/COM"
             }
           >
             <Usb className="h-3.5 w-3.5" />
             {printingThermal ? "Menyiapkan..." : "Cetak Thermal"}
           </Button>
         )}
-        {!androidClient && (
+        {isPhone ? (
           <Button
             size="sm"
             variant="outline"
-            onClick={() => handlePrintNota()}
+            onClick={() => void handleDownloadGambar()}
+            disabled={savingPdf}
             className="gap-1"
-            title="Dialog cetak sistem (sering gagal di POS-58)"
+            title="Unduh PNG untuk dibuka di Thermer"
           >
-            <Printer className="h-3.5 w-3.5" />
-            Cetak Sistem
+            <Download className="h-3.5 w-3.5" />
+            {savingPdf ? "Menyiapkan..." : "Unduh Gambar"}
           </Button>
+        ) : (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handlePrintNota()}
+              className="gap-1"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              Cetak Sistem
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleSavePdf()}
+              disabled={savingPdf}
+              className="gap-1"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {savingPdf ? "Menyimpan..." : "Simpan PDF"}
+            </Button>
+          </>
         )}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleDownloadEscPos()}
-          className="gap-1"
-          title={
-            androidClient || mobileClient
-              ? "Unduh gambar nota PNG"
-              : "Unduh ESC/POS .bin"
-          }
-        >
-          <Download className="h-3.5 w-3.5" />
-          {androidClient || mobileClient ? "Unduh Gambar" : "File Thermal"}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void handleSavePdf()}
-          disabled={savingPdf}
-          className="gap-1"
-        >
-          <Download className="h-3.5 w-3.5" />
-          {savingPdf
-            ? "Menyimpan..."
-            : androidClient || mobileClient
-              ? "Unduh PNG"
-              : "Simpan PDF"}
-        </Button>
       </div>
       <p className="mb-4 text-center text-xs text-muted-foreground">
-        {androidClient || (!serialOk && mobileClient) ? (
+        {isPhone ? (
           <>
-            Pakai <span className="font-medium">Cetak Thermal</span> /{" "}
-            <span className="font-medium">Unduh PNG</span> ke Thermer (bukan
-            PDF — PDF hasilnya kecil). Set kertas 58mm. Nominal sudah diberi
-            margin kanan agar tidak terpotong.
+            HP: <span className="font-medium">Cetak Thermal</span> (bagikan) atau{" "}
+            <span className="font-medium">Unduh Gambar</span>, lalu buka di
+            Thermer. Jangan PDF.
           </>
         ) : serialOk ? (
           <>
-            Laptop: pakai <span className="font-medium">Cetak Thermal</span>{" "}
-            (USB/COM). Cetak Sistem sering kertas kosong di POS-58.
+            Laptop: <span className="font-medium">Cetak Thermal</span> (USB/COM).
           </>
         ) : (
-          <>
-            Sambungkan printer di Chrome PC agar Cetak Thermal muncul, atau di
-            HP bagikan gambar ke app printer gratis.
-          </>
+          <>Sambungkan printer di Chrome PC, atau cetak dari HP via Thermer.</>
         )}
       </p>
 

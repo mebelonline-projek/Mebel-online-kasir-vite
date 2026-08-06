@@ -15,11 +15,11 @@ export const THERMAL_COLS = 32;
 export const THERMAL_DOT_WIDTH = 384;
 
 /**
- * Lebar PNG untuk share ke Thermer/dll.
- * Banyak app default 80mm (576 dot); gambar 384 tampak kecil di tengah.
- * 576 + font memenuhi lebar → di kertas 58mm tetap full jika "fit width".
+ * Lebar PNG untuk share/unduh ke Thermer POS-58.
+ * Harus ≈ 384 dot (lebar kepala cetak 58mm). Gambar 576 dipotong kanan
+ * oleh Thermer → nominal Rp hilang.
  */
-export const THERMAL_SHARE_PNG_WIDTH = 576;
+export const THERMAL_SHARE_PNG_WIDTH = 384;
 
 /** Baud default; banyak BT/USB murah = 9600, sebagian 115200. */
 export const THERMAL_BAUD_RATE = 9600;
@@ -255,8 +255,7 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
 
 /**
  * Gambar nota ke canvas.
- * forShare: lebar 576 + font memenuhi lebar; margin kanan lebih besar
- * (Thermer sering memotong tepi kanan — nominal Rp terpotong).
+ * forShare: font memenuhi lebar 384 (POS-58). Jangan 576 — Thermer potong kanan.
  */
 function drawThermalNotaCanvas(
   data: ThermalNotaInput,
@@ -268,16 +267,14 @@ function drawThermalNotaCanvas(
   const forShare = opts?.forShare === true;
   const width =
     opts?.width ?? (forShare ? THERMAL_SHARE_PNG_WIDTH : THERMAL_DOT_WIDTH);
-  // Thermer crop kanan → sisakan gutter kanan lebih lebar
-  const marginLeft = forShare ? 14 : 12;
-  const marginRight = forShare ? 36 : 12;
+  const marginLeft = forShare ? 8 : 12;
+  const marginRight = forShare ? 16 : 12;
   const usable = Math.max(width - marginLeft - marginRight, 64);
-  // Sedikit lebih kecil dari max agar nominal Rp tidak mepet tepi
-  const bodyPx = Math.max(15, Math.floor(usable / (THERMAL_COLS * 0.6)));
+  const bodyPx = Math.max(13, Math.floor(usable / (THERMAL_COLS * 0.6)));
   const strongPx = bodyPx + 2;
-  const titlePx = bodyPx + 4;
-  const lineHeight = Math.round(bodyPx * 1.5);
-  const padY = Math.round(bodyPx * 0.45);
+  const titlePx = bodyPx + 3;
+  const lineHeight = Math.round(bodyPx * 1.48);
+  const padY = Math.round(bodyPx * 0.4);
   const height = Math.max(lineHeight * rows.length + padY * 2, 40);
   const centerX = Math.floor(width / 2);
 
@@ -311,11 +308,10 @@ function drawThermalNotaCanvas(
         const left = sep[1] ?? "";
         const right = sep[3] ?? "";
         const rightW = ctx.measureText(right).width;
-        const gap = Math.max(8, Math.floor(bodyPx * 0.4));
-        const leftMax = Math.max(40, usable - rightW - gap);
+        const gap = Math.max(6, Math.floor(bodyPx * 0.35));
+        const leftMax = Math.max(32, usable - rightW - gap);
         ctx.textAlign = "left";
         ctx.fillText(left, marginLeft, y, leftMax);
-        // Tanpa maxWidth — jangan potong nominal; posisi sebelum gutter kanan
         ctx.textAlign = "right";
         ctx.fillText(right, width - marginRight, y);
       } else {
@@ -371,7 +367,7 @@ export function buildThermalNotaRasterEscPos(
   ]);
 }
 
-/** PNG penuh lebar untuk Thermer / app share (bukan 384px kecil di tengah). */
+/** PNG 384px (lebar POS-58) — jangan 576 agar Thermer tidak potong kanan. */
 export async function renderThermalNotaPngBlob(
   data: ThermalNotaInput,
 ): Promise<Blob> {
