@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -49,8 +49,16 @@ import {
   updateOperationalCost,
   type OperationalCostRow,
 } from "@/lib/operational-costs";
+import {
+  getTransactionDateBounds,
+  wibNoonISO,
+} from "@/lib/date-utils";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { operationalCostSchema } from "@/lib/validation";
+
+function formatCostDate(periodStart: string) {
+  return formatDate(wibNoonISO(periodStart));
+}
 
 const NAMA_BULAN = [
   "Januari",
@@ -124,6 +132,9 @@ export function OperasionalPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [customDari, setCustomDari] = useState(dari);
   const [customSampai, setCustomSampai] = useState(sampai);
+  const dateBounds = useMemo(() => getTransactionDateBounds(), []);
+  const [costDate, setCostDate] = useState(dateBounds.today);
+  const isBackdated = costDate !== dateBounds.today;
 
   useEffect(() => {
     setCustomDari(dari);
@@ -196,6 +207,7 @@ export function OperasionalPage() {
     setForm(emptyForm);
     setFormErrors({});
     setEditingCost(null);
+    setCostDate(getTransactionDateBounds().today);
   }
 
   function openAddModal() {
@@ -219,6 +231,7 @@ export function OperasionalPage() {
       operationalCostSchema.parse({
         ...form,
         amount: Number(form.amount),
+        ...(editingCost ? {} : { cost_date: costDate }),
       });
       setFormErrors({});
       return true;
@@ -240,11 +253,18 @@ export function OperasionalPage() {
     if (!validateForm()) return;
     setIsSubmitting(true);
     try {
-      const payload = {
-        name: form.name,
-        amount: Number(form.amount),
-        category: form.category || "LAINNYA",
-      };
+      const payload = editingCost
+        ? {
+            name: form.name,
+            amount: Number(form.amount),
+            category: form.category || "LAINNYA",
+          }
+        : {
+            name: form.name,
+            amount: Number(form.amount),
+            category: form.category || "LAINNYA",
+            cost_date: costDate,
+          };
 
       const result = editingCost
         ? await updateOperationalCost(editingCost.id, payload)
@@ -421,7 +441,7 @@ export function OperasionalPage() {
                       {cost.category || "LAINNYA"}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
-                      {formatDate(cost.created_at)}
+                      {formatCostDate(cost.period_start)}
                     </span>
                   </div>
                   <p className="font-semibold">{cost.name}</p>
@@ -486,7 +506,7 @@ export function OperasionalPage() {
                         {formatCurrency(cost.amount)}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(cost.created_at)}
+                        {formatCostDate(cost.period_start)}
                       </TableCell>
                       {isOwner && (
                         <TableCell>
@@ -633,6 +653,43 @@ export function OperasionalPage() {
                 </div>
               )}
             </div>
+
+            {!editingCost && (
+              <div className="space-y-1.5">
+                <label htmlFor="cost_date" className="text-sm font-medium">
+                  Tanggal biaya
+                </label>
+                <Input
+                  id="cost_date"
+                  type="date"
+                  value={costDate}
+                  min={dateBounds.min}
+                  max={dateBounds.today}
+                  onChange={(e) => setCostDate(e.target.value)}
+                  className={formErrors.cost_date ? "border-destructive" : ""}
+                />
+                {formErrors.cost_date && (
+                  <p className="text-xs text-destructive">
+                    {formErrors.cost_date}
+                  </p>
+                )}
+                {isBackdated && (
+                  <p className="text-xs text-muted-foreground">
+                    Mundur ke{" "}
+                    {new Date(wibNoonISO(costDate)).toLocaleDateString(
+                      "id-ID",
+                      {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        timeZone: "Asia/Jakarta",
+                      }
+                    )}
+                    . Biaya masuk ke periode tanggal tersebut.
+                  </p>
+                )}
+              </div>
+            )}
 
             <DialogFooter className="gap-2 pt-2">
               <Button

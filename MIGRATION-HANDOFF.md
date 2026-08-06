@@ -85,13 +85,23 @@ Untuk transaksi yang lupa diinput. Aturan:
 - Dashboard mengikuti **periode kalender berjalan**, jadi transaksi mundur bisa muncul di mingguan/tahunan tapi tidak di harian/bulanan (mis. 31 Jul saat hari ini 1 Agu). Ini benar, bukan bug.
 - Helper: `wibNoonISO`, `getTransactionDateBounds`, `isWibDateInAllowedRange` di `src/lib/date-utils.ts`; UI di `src/pages/kasir-page.tsx`.
 
+#### Tanggal custom biaya operasional — kontrak (sudah di SPA)
+
+Untuk biaya yang lupa diinput di hari yang sudah lewat. Aturan:
+
+- Field `cost_date` (`YYYY-MM-DD`) **hanya di form tambah** (`/operasional`); mode edit tidak menampilkan / tidak mengubah periode.
+- Default hari ini WIB; batas sama transaksi (`min` = hari ini − 365, `max` = hari ini). Masa depan ditolak Zod.
+- Kosong = hari ini. **Tanpa kolom DB baru** — create menulis `period_start` = `period_end` = tanggal dipilih.
+- `created_at` tetap waktu insert (audit). List menampilkan `period_start`; dashboard/filter sudah overlap `period_*`.
+- Helper reuse: `getTransactionDateBounds`, `isWibDateInAllowedRange`; UI di `src/pages/operasional-page.tsx`.
+
 ### Opsional smoke (user) — SPA Gudang / Operasional / Piutang / Invoice / Nota / Dashboard
 
 - OWNER/GUDANG: buat lokasi + kategori + barang standalone + parent+2 varian → cek matrix Stok.
 - Mutasi Masuk/Keluar/Pindah; riwayat muncul.
 - Kasir hanya leaf; ranking nama; jual → stok potong; tanggal custom mundur (opsional).
 - Hapus barang dengan stok: diizinkan; hapus kategori terpakai: diblok.
-- OWNER/KARYAWAN: `/operasional` — tambah biaya; OWNER edit/hapus; filter bulan + range custom.
+- OWNER/KARYAWAN: `/operasional` — tambah biaya (tanggal custom create-only); OWNER edit/hapus; filter bulan + range custom.
 - OWNER: `/piutang` — list outstanding; CTA pelunasan jalan.
 - OWNER/KASIR: `/invoice` — buat dari trx DP; detail print/PDF; OWNER hapus; pelunasan sync totals.
 - OWNER: detail transaksi → Nota (cetak/PDF); Kelola HPP; estimasi laba kotor; Status Pesanan; Edit DP; WhatsApp; Hapus permanen.

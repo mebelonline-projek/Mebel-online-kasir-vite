@@ -11,6 +11,8 @@ export interface OperationalCostRow {
   name: string;
   amount: number;
   category: string;
+  period_start: string;
+  period_end?: string;
   created_at: string;
 }
 
@@ -103,6 +105,7 @@ export async function listOperationalCosts(
           .select("*", { count: "exact" })
           .lte("period_start", end)
           .gte("period_end", start)
+          .order("period_start", { ascending: false })
           .order("created_at", { ascending: false })
           .range(offset, offset + limit - 1),
         supabase
@@ -154,15 +157,18 @@ export async function createOperationalCost(
     const user = await requireUser();
     if (!user) return { success: false, message: "Anda harus login" };
 
-    const today = getWibDateString();
+    const costDate =
+      parsed.data.cost_date && parsed.data.cost_date.length > 0
+        ? parsed.data.cost_date
+        : getWibDateString();
     const { data, error } = await supabase
       .from("operational_costs")
       .insert({
         name: parsed.data.name,
         amount: parsed.data.amount,
         category: parsed.data.category || "LAINNYA",
-        period_start: today,
-        period_end: today,
+        period_start: costDate,
+        period_end: costDate,
         created_by: user.id,
       })
       .select("id")
