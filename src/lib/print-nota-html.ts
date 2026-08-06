@@ -212,7 +212,7 @@ export function printNotaHtml(data: NotaPrintData): void {
         window.print();
       }, 300);
     };
-  <\/script>
+  </script>
 </body>
 </html>`);
   win.document.close();
