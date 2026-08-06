@@ -7,10 +7,10 @@ import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { buildNotaPdfData } from "@/lib/pdf-invoice";
+import { printNotaHtml } from "@/lib/print-nota-html";
 import {
   downloadBlob,
   isMobilePrintClient,
-  printNotaPdfBlob,
   renderNotaPdfBlob,
 } from "@/lib/print-nota-pdf";
 import {
@@ -69,7 +69,6 @@ export function NotaDocument({
 }: NotaProps) {
   const navigate = useNavigate();
   const [savingPdf, setSavingPdf] = useState(false);
-  const [printingNota, setPrintingNota] = useState(false);
   const [printingThermal, setPrintingThermal] = useState(false);
   const [serialOk, setSerialOk] = useState(false);
   const [mobileClient, setMobileClient] = useState(false);
@@ -100,34 +99,43 @@ export function NotaDocument({
     }
   };
 
-  /** Cetak via PDF 58mm (Chrome Android Bluetooth + desktop). Fallback HTML print di desktop. */
-  const handlePrintNota = async () => {
-    setPrintingNota(true);
+  /** Jendela HTML 58mm — hindari PDF sempit yang jadi garis putih di preview A4. */
+  const handlePrintNota = () => {
     try {
-      const pdfData = await buildNotaPdfData(transaction_id);
-      if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
-      const blob = await renderNotaPdfBlob(pdfData);
-      const mode = await printNotaPdfBlob(blob);
-      if (mode === "opened") {
-        toast.message(
-          "PDF nota terbuka. Ketuk ⋮ → Cetak → pilih printer Bluetooth. Skala 100%, tanpa fit-to-page.",
-          { duration: 8000 },
-        );
-      }
+      printNotaHtml({
+        store_name,
+        store_address: store_address || undefined,
+        store_phone: store_phone || undefined,
+        transaction_number,
+        customer_name,
+        payment_type,
+        created_at_label: formatDate(created_at),
+        lineItems,
+        customerCharges,
+        final_price,
+        total_due: totalDue,
+        total_paid: totalPaid,
+        remaining,
+        dp_amount,
+        status,
+        payments: payments.map((p) => ({
+          payment_date: formatDate(p.payment_date),
+          method: p.method,
+          amount: p.amount,
+        })),
+        money: formatCurrency,
+      });
+      toast.message(
+        "Di dialog cetak: pilih POS-58 → Setelan lain → kertas 58mm, margin minimum, skala 100%.",
+        { duration: 9000 },
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       if (msg === "POPUP_BLOCKED") {
-        toast.message(
-          "Popup diblokir — file PDF diunduh. Buka file lalu Cetak ke printer Bluetooth.",
-          { duration: 8000 },
-        );
-      } else if (!mobileClient) {
-        window.print();
+        toast.error("Izinkan popup untuk cetak nota, lalu coba lagi");
       } else {
-        toast.error("Gagal menyiapkan cetak nota");
+        toast.error("Gagal membuka jendela cetak");
       }
-    } finally {
-      setPrintingNota(false);
     }
   };
 
@@ -183,17 +191,12 @@ export function NotaDocument({
         </Button>
         <Button
           size="sm"
-          onClick={() => void handlePrintNota()}
-          disabled={printingNota}
+          onClick={() => handlePrintNota()}
           className="gap-1"
-          title={
-            mobileClient
-              ? "Buka PDF 58mm lalu cetak ke printer Bluetooth"
-              : "Cetak nota thermal (PDF 58mm)"
-          }
+          title="Cetak ke POS-58 via jendela HTML 58mm"
         >
           <Printer className="h-3.5 w-3.5" />
-          {printingNota ? "Menyiapkan..." : "Cetak Nota"}
+          Cetak Nota
         </Button>
         {serialOk && (
           <Button
@@ -219,10 +222,16 @@ export function NotaDocument({
           {savingPdf ? "Menyimpan..." : "Simpan PDF"}
         </Button>
       </div>
-      {mobileClient && (
+      {mobileClient ? (
         <p className="mb-4 text-center text-xs text-muted-foreground">
-          Di Android: Cetak Nota membuka PDF sempit (58mm). Lalu ⋮ → Cetak →
-          printer Bluetooth, skala 100%.
+          Cetak Nota membuka jendela sempit. Di dialog: pilih printer
+          Bluetooth/POS-58, kertas 58mm, skala 100%.
+        </p>
+      ) : (
+        <p className="mb-4 text-center text-xs text-muted-foreground">
+          Cetak Nota → pilih <span className="font-medium">POS-58</span> →
+          Setelan lain: kertas 58mm, margin minimum, skala 100% (jangan
+          fit-to-page).
         </p>
       )}
 
