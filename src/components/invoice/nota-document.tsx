@@ -95,13 +95,26 @@ export function NotaDocument({
   const handleSavePdf = async () => {
     setSavingPdf(true);
     try {
+      // Thermer: PDF 58mm tampak kecil. Di Android unduh PNG penuh lebar.
+      if (androidClient || mobileClient) {
+        const blob = await renderThermalNotaPngBlob(buildThermalInput());
+        downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
+        toast.success(
+          "Gambar nota diunduh (PNG). Buka di Thermer — PDF sempit hasilnya kecil.",
+        );
+        return;
+      }
       const pdfData = await buildNotaPdfData(transaction_id);
       if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
       const blob = await renderNotaPdfBlob(pdfData);
       downloadBlob(blob, `NOTA-${transaction_number}.pdf`);
       toast.success("Nota berhasil disimpan sebagai PDF");
     } catch {
-      toast.error("Gagal menyimpan nota sebagai PDF");
+      toast.error(
+        androidClient || mobileClient
+          ? "Gagal mengunduh gambar nota"
+          : "Gagal menyimpan nota sebagai PDF",
+      );
     } finally {
       setSavingPdf(false);
     }
@@ -296,16 +309,20 @@ export function NotaDocument({
           className="gap-1"
         >
           <Download className="h-3.5 w-3.5" />
-          {savingPdf ? "Menyimpan..." : "Simpan PDF"}
+          {savingPdf
+            ? "Menyimpan..."
+            : androidClient || mobileClient
+              ? "Unduh PNG"
+              : "Simpan PDF"}
         </Button>
       </div>
       <p className="mb-4 text-center text-xs text-muted-foreground">
         {androidClient || (!serialOk && mobileClient) ? (
           <>
-            Android: <span className="font-medium">Cetak Thermal</span> membagikan
-            gambar nota penuh lebar. Di Thermer: set kertas{" "}
-            <span className="font-medium">58mm</span> dan skala fit/lebar penuh.
-            App gratis lain: Thermal Printer BT / PrinterMax.
+            Pakai <span className="font-medium">Cetak Thermal</span> /{" "}
+            <span className="font-medium">Unduh PNG</span> ke Thermer (bukan
+            PDF — PDF hasilnya kecil). Set kertas 58mm. Nominal sudah diberi
+            margin kanan agar tidak terpotong.
           </>
         ) : serialOk ? (
           <>

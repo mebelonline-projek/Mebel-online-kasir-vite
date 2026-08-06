@@ -255,7 +255,8 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
 
 /**
  * Gambar nota ke canvas.
- * forShare: lebar 576 + font memenuhi lebar (hindari “kecil di tengah” di Thermer).
+ * forShare: lebar 576 + font memenuhi lebar; margin kanan lebih besar
+ * (Thermer sering memotong tepi kanan — nominal Rp terpotong).
  */
 function drawThermalNotaCanvas(
   data: ThermalNotaInput,
@@ -265,15 +266,18 @@ function drawThermalNotaCanvas(
 
   const rows = buildThermalNotaLines(data);
   const forShare = opts?.forShare === true;
-  const width = opts?.width ?? (forShare ? THERMAL_SHARE_PNG_WIDTH : THERMAL_DOT_WIDTH);
-  const marginX = forShare ? 6 : 12;
-  const usable = Math.max(width - marginX * 2, 64);
-  // Isi lebar seperti template Thermer (monospace ~0.6em/glyph)
-  const bodyPx = Math.max(16, Math.floor(usable / (THERMAL_COLS * 0.58)));
-  const strongPx = bodyPx + 3;
-  const titlePx = bodyPx + 5;
+  const width =
+    opts?.width ?? (forShare ? THERMAL_SHARE_PNG_WIDTH : THERMAL_DOT_WIDTH);
+  // Thermer crop kanan → sisakan gutter kanan lebih lebar
+  const marginLeft = forShare ? 14 : 12;
+  const marginRight = forShare ? 36 : 12;
+  const usable = Math.max(width - marginLeft - marginRight, 64);
+  // Sedikit lebih kecil dari max agar nominal Rp tidak mepet tepi
+  const bodyPx = Math.max(15, Math.floor(usable / (THERMAL_COLS * 0.6)));
+  const strongPx = bodyPx + 2;
+  const titlePx = bodyPx + 4;
   const lineHeight = Math.round(bodyPx * 1.5);
-  const padY = Math.round(bodyPx * 0.4);
+  const padY = Math.round(bodyPx * 0.45);
   const height = Math.max(lineHeight * rows.length + padY * 2, 40);
   const centerX = Math.floor(width / 2);
 
@@ -302,18 +306,21 @@ function drawThermalNotaCanvas(
       ctx.textAlign = "center";
       ctx.fillText(row.text, centerX, y, usable);
     } else {
-      // Gambar kiri–kanan agar total/harga nempel tepi (bukan cluster di tengah)
       const sep = row.text.match(/^(.*?)(\s{2,})(\S.*)$/);
       if (sep) {
         const left = sep[1] ?? "";
         const right = sep[3] ?? "";
+        const rightW = ctx.measureText(right).width;
+        const gap = Math.max(8, Math.floor(bodyPx * 0.4));
+        const leftMax = Math.max(40, usable - rightW - gap);
         ctx.textAlign = "left";
-        ctx.fillText(left, marginX, y, usable * 0.65);
+        ctx.fillText(left, marginLeft, y, leftMax);
+        // Tanpa maxWidth — jangan potong nominal; posisi sebelum gutter kanan
         ctx.textAlign = "right";
-        ctx.fillText(right, width - marginX, y, usable * 0.35);
+        ctx.fillText(right, width - marginRight, y);
       } else {
         ctx.textAlign = "left";
-        ctx.fillText(row.text, marginX, y, usable);
+        ctx.fillText(row.text, marginLeft, y, usable);
       }
     }
     y += lineHeight;
