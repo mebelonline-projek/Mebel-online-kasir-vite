@@ -8,6 +8,12 @@ import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { buildNotaPdfData } from "@/lib/pdf-invoice";
 import {
+  downloadBlob,
+  isMobilePrintClient,
+  printNotaPdfBlob,
+  renderNotaPdfBlob,
+} from "@/lib/print-nota-pdf";
+import {
   buildThermalNotaEscPos,
   isWebSerialSupported,
   printViaWebSerial,
@@ -63,36 +69,65 @@ export function NotaDocument({
 }: NotaProps) {
   const navigate = useNavigate();
   const [savingPdf, setSavingPdf] = useState(false);
+  const [printingNota, setPrintingNota] = useState(false);
   const [printingThermal, setPrintingThermal] = useState(false);
   const [serialOk, setSerialOk] = useState(false);
+  const [mobileClient, setMobileClient] = useState(false);
 
   useEffect(() => {
     setSerialOk(isWebSerialSupported());
+    setMobileClient(isMobilePrintClient());
   }, []);
+
+  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
+  const chargesTotal = customerCharges.reduce((sum, c) => sum + c.amount, 0);
+  const totalDue = final_price + chargesTotal;
+  const remaining = totalDue - totalPaid;
+  const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
 
   const handleSavePdf = async () => {
     setSavingPdf(true);
     try {
       const pdfData = await buildNotaPdfData(transaction_id);
       if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
-      const [{ pdf }, { InvoiceDocument }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("@/components/invoice/invoice-document"),
-      ]);
-      const blob = await pdf(<InvoiceDocument data={pdfData} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `NOTA-${transaction_number}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const blob = await renderNotaPdfBlob(pdfData);
+      downloadBlob(blob, `NOTA-${transaction_number}.pdf`);
       toast.success("Nota berhasil disimpan sebagai PDF");
     } catch {
       toast.error("Gagal menyimpan nota sebagai PDF");
     } finally {
       setSavingPdf(false);
+    }
+  };
+
+  /** Cetak via PDF 58mm (Chrome Android Bluetooth + desktop). Fallback HTML print di desktop. */
+  const handlePrintNota = async () => {
+    setPrintingNota(true);
+    try {
+      const pdfData = await buildNotaPdfData(transaction_id);
+      if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
+      const blob = await renderNotaPdfBlob(pdfData);
+      const mode = await printNotaPdfBlob(blob);
+      if (mode === "opened") {
+        toast.message(
+          "PDF nota terbuka. Ketuk ⋮ → Cetak → pilih printer Bluetooth. Skala 100%, tanpa fit-to-page.",
+          { duration: 8000 },
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "POPUP_BLOCKED") {
+        toast.message(
+          "Popup diblokir — file PDF diunduh. Buka file lalu Cetak ke printer Bluetooth.",
+          { duration: 8000 },
+        );
+      } else if (!mobileClient) {
+        window.print();
+      } else {
+        toast.error("Gagal menyiapkan cetak nota");
+      }
+    } finally {
+      setPrintingNota(false);
     }
   };
 
@@ -131,12 +166,6 @@ export function NotaDocument({
     }
   };
 
-  const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const chargesTotal = customerCharges.reduce((sum, c) => sum + c.amount, 0);
-  const totalDue = final_price + chargesTotal;
-  const remaining = totalDue - totalPaid;
-  const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
-
   return (
     <div className="bg-background text-foreground">
       <div
@@ -152,9 +181,19 @@ export function NotaDocument({
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali
         </Button>
-        <Button size="sm" onClick={() => window.print()} className="gap-1">
+        <Button
+          size="sm"
+          onClick={() => void handlePrintNota()}
+          disabled={printingNota}
+          className="gap-1"
+          title={
+            mobileClient
+              ? "Buka PDF 58mm lalu cetak ke printer Bluetooth"
+              : "Cetak nota thermal (PDF 58mm)"
+          }
+        >
           <Printer className="h-3.5 w-3.5" />
-          Cetak Nota
+          {printingNota ? "Menyiapkan..." : "Cetak Nota"}
         </Button>
         {serialOk && (
           <Button
@@ -180,6 +219,12 @@ export function NotaDocument({
           {savingPdf ? "Menyimpan..." : "Simpan PDF"}
         </Button>
       </div>
+      {mobileClient && (
+        <p className="mb-4 text-center text-xs text-muted-foreground">
+          Di Android: Cetak Nota membuka PDF sempit (58mm). Lalu ⋮ → Cetak →
+          printer Bluetooth, skala 100%.
+        </p>
+      )}
 
       <div
         className="mx-auto max-w-[500px] rounded-xl border border-border bg-white p-6 text-black shadow-sm sm:p-8"

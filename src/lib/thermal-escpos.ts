@@ -7,7 +7,8 @@
  * - Bluetooth Classic (pair OS Android/Windows) + USB
  * - Windows: Generic / Text Only atau raw serial USB
  *
- * Cetak HP Android / PC pair OS → window.print() + layout 58mm (Jalur A).
+ * Cetak HP Android Chrome + Bluetooth → PDF nota 58mm (Cetak Nota) lalu
+ *   dialog Cetak sistem → printer BT (Jalur A). HTML window.print 58mm sering pecah.
  * Cetak 1-tap PC USB → printViaWebSerial() di bawah (Jalur B).
  * iPhone PWA: thermal kasir BT biasanya tidak tersedia (AirPrint saja).
  */
