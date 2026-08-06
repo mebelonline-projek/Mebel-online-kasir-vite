@@ -14,6 +14,13 @@ export const THERMAL_COLS = 32;
 /** Dot horizontal 58mm @ ~203dpi. Harus kelipatan 8. */
 export const THERMAL_DOT_WIDTH = 384;
 
+/**
+ * Lebar PNG untuk share ke Thermer/dll.
+ * Banyak app default 80mm (576 dot); gambar 384 tampak kecil di tengah.
+ * 576 + font memenuhi lebar → di kertas 58mm tetap full jika "fit width".
+ */
+export const THERMAL_SHARE_PNG_WIDTH = 576;
+
 /** Baud default; banyak BT/USB murah = 9600, sebagian 115200. */
 export const THERMAL_BAUD_RATE = 9600;
 
@@ -247,17 +254,27 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
 }
 
 /**
- * Raster monochrome GS v 0 — center header pakai canvas textAlign.
+ * Gambar nota ke canvas.
+ * forShare: lebar 576 + font memenuhi lebar (hindari “kecil di tengah” di Thermer).
  */
-function drawThermalNotaCanvas(data: ThermalNotaInput): HTMLCanvasElement | null {
+function drawThermalNotaCanvas(
+  data: ThermalNotaInput,
+  opts?: { width?: number; forShare?: boolean },
+): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
 
   const rows = buildThermalNotaLines(data);
-  const width = THERMAL_DOT_WIDTH;
-  const lineHeight = 24;
-  const padY = 10;
+  const forShare = opts?.forShare === true;
+  const width = opts?.width ?? (forShare ? THERMAL_SHARE_PNG_WIDTH : THERMAL_DOT_WIDTH);
+  const marginX = forShare ? 6 : 12;
+  const usable = Math.max(width - marginX * 2, 64);
+  // Isi lebar seperti template Thermer (monospace ~0.6em/glyph)
+  const bodyPx = Math.max(16, Math.floor(usable / (THERMAL_COLS * 0.58)));
+  const strongPx = bodyPx + 3;
+  const titlePx = bodyPx + 5;
+  const lineHeight = Math.round(bodyPx * 1.5);
+  const padY = Math.round(bodyPx * 0.4);
   const height = Math.max(lineHeight * rows.length + padY * 2, 40);
-  const marginX = 12;
   const centerX = Math.floor(width / 2);
 
   const canvas = document.createElement("canvas");
@@ -274,19 +291,30 @@ function drawThermalNotaCanvas(data: ThermalNotaInput): HTMLCanvasElement | null
   let y = padY;
   for (const row of rows) {
     if (row.emphasis === "title") {
-      ctx.font = "bold 18px monospace";
+      ctx.font = `bold ${titlePx}px monospace`;
     } else if (row.emphasis === "strong") {
-      ctx.font = "bold 16px monospace";
+      ctx.font = `bold ${strongPx}px monospace`;
     } else {
-      ctx.font = "15px monospace";
+      ctx.font = `${bodyPx}px monospace`;
     }
 
     if (row.align === "center") {
       ctx.textAlign = "center";
-      ctx.fillText(row.text, centerX, y);
+      ctx.fillText(row.text, centerX, y, usable);
     } else {
-      ctx.textAlign = "left";
-      ctx.fillText(row.text, marginX, y);
+      // Gambar kiri–kanan agar total/harga nempel tepi (bukan cluster di tengah)
+      const sep = row.text.match(/^(.*?)(\s{2,})(\S.*)$/);
+      if (sep) {
+        const left = sep[1] ?? "";
+        const right = sep[3] ?? "";
+        ctx.textAlign = "left";
+        ctx.fillText(left, marginX, y, usable * 0.65);
+        ctx.textAlign = "right";
+        ctx.fillText(right, width - marginX, y, usable * 0.35);
+      } else {
+        ctx.textAlign = "left";
+        ctx.fillText(row.text, marginX, y, usable);
+      }
     }
     y += lineHeight;
   }
@@ -297,7 +325,7 @@ function drawThermalNotaCanvas(data: ThermalNotaInput): HTMLCanvasElement | null
 export function buildThermalNotaRasterEscPos(
   data: ThermalNotaInput,
 ): Uint8Array {
-  const canvas = drawThermalNotaCanvas(data);
+  const canvas = drawThermalNotaCanvas(data, { width: THERMAL_DOT_WIDTH });
   if (!canvas) return buildThermalNotaEscPos(data);
 
   const width = canvas.width;
@@ -336,11 +364,14 @@ export function buildThermalNotaRasterEscPos(
   ]);
 }
 
-/** PNG nota 58mm — gratis dishare ke app printer Android (tanpa RawBT berbayar). */
+/** PNG penuh lebar untuk Thermer / app share (bukan 384px kecil di tengah). */
 export async function renderThermalNotaPngBlob(
   data: ThermalNotaInput,
 ): Promise<Blob> {
-  const canvas = drawThermalNotaCanvas(data);
+  const canvas = drawThermalNotaCanvas(data, {
+    width: THERMAL_SHARE_PNG_WIDTH,
+    forShare: true,
+  });
   if (!canvas) throw new Error("Gagal membuat gambar nota");
   return new Promise((resolve, reject) => {
     canvas.toBlob(

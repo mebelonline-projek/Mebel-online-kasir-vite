@@ -303,10 +303,9 @@ export function NotaDocument({
         {androidClient || (!serialOk && mobileClient) ? (
           <>
             Android: <span className="font-medium">Cetak Thermal</span> membagikan
-            gambar nota (gratis). Install app printer Bluetooth gratis mis.{" "}
-            <span className="font-medium">Thermal Printer BT</span> atau{" "}
-            <span className="font-medium">PrinterMax</span>, pair printer, lalu
-            pilih app itu saat berbagi. Tidak perlu RawBT berbayar.
+            gambar nota penuh lebar. Di Thermer: set kertas{" "}
+            <span className="font-medium">58mm</span> dan skala fit/lebar penuh.
+            App gratis lain: Thermal Printer BT / PrinterMax.
           </>
         ) : serialOk ? (
           <>
