@@ -249,12 +249,8 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
 /**
  * Raster monochrome GS v 0 — center header pakai canvas textAlign.
  */
-export function buildThermalNotaRasterEscPos(
-  data: ThermalNotaInput,
-): Uint8Array {
-  if (typeof document === "undefined") {
-    return buildThermalNotaEscPos(data);
-  }
+function drawThermalNotaCanvas(data: ThermalNotaInput): HTMLCanvasElement | null {
+  if (typeof document === "undefined") return null;
 
   const rows = buildThermalNotaLines(data);
   const width = THERMAL_DOT_WIDTH;
@@ -268,7 +264,7 @@ export function buildThermalNotaRasterEscPos(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return buildThermalNotaEscPos(data);
+  if (!ctx) return null;
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
@@ -294,6 +290,20 @@ export function buildThermalNotaRasterEscPos(
     }
     y += lineHeight;
   }
+
+  return canvas;
+}
+
+export function buildThermalNotaRasterEscPos(
+  data: ThermalNotaInput,
+): Uint8Array {
+  const canvas = drawThermalNotaCanvas(data);
+  if (!canvas) return buildThermalNotaEscPos(data);
+
+  const width = canvas.width;
+  const height = canvas.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return buildThermalNotaEscPos(data);
 
   const image = ctx.getImageData(0, 0, width, height);
   const bytesPerRow = width / 8;
@@ -324,6 +334,72 @@ export function buildThermalNotaRasterEscPos(
     raster,
     new Uint8Array([ESC, 0x64, 0x04]),
   ]);
+}
+
+/** PNG nota 58mm — gratis dishare ke app printer Android (tanpa RawBT berbayar). */
+export async function renderThermalNotaPngBlob(
+  data: ThermalNotaInput,
+): Promise<Blob> {
+  const canvas = drawThermalNotaCanvas(data);
+  if (!canvas) throw new Error("Gagal membuat gambar nota");
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Gagal encode PNG"));
+      },
+      "image/png",
+      1,
+    );
+  });
+}
+
+export function downloadBlobFile(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Android: bagikan PNG ke app printer gratis (Thermal Printer BT, PrinterMax, dll).
+ * Fallback: unduh PNG.
+ */
+export async function shareOrDownloadThermalPng(
+  data: ThermalNotaInput,
+  filename: string,
+): Promise<"shared" | "downloaded"> {
+  const blob = await renderThermalNotaPngBlob(data);
+  const file = new File([blob], filename, { type: "image/png" });
+
+  const canShareFile =
+    typeof navigator !== "undefined" &&
+    typeof navigator.share === "function" &&
+    (!navigator.canShare || navigator.canShare({ files: [file] }));
+
+  if (canShareFile) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: "Nota Pembayaran",
+        text: "Cetak nota ke printer thermal",
+      });
+      return "shared";
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (/AbortError|canceled|cancelled/i.test(msg)) {
+        throw new Error("SHARE_CANCELLED");
+      }
+      // lanjut unduh
+    }
+  }
+
+  downloadBlobFile(blob, filename);
+  return "downloaded";
 }
 
 export function downloadEscPosFile(

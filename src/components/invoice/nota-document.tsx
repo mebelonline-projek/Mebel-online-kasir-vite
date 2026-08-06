@@ -15,11 +15,14 @@ import {
 } from "@/lib/print-nota-pdf";
 import {
   buildThermalNotaEscPos,
+  downloadBlobFile,
   downloadEscPosFile,
   isAndroidClient,
   isWebSerialSupported,
-  printViaRawBt,
   printViaWebSerial,
+  renderThermalNotaPngBlob,
+  shareOrDownloadThermalPng,
+  type ThermalNotaInput,
 } from "@/lib/thermal-escpos";
 
 interface PaymentItem {
@@ -104,29 +107,30 @@ export function NotaDocument({
     }
   };
 
-  const buildEscPosPayload = () =>
-    buildThermalNotaEscPos({
-      store_name,
-      store_address: store_address || undefined,
-      store_phone: store_phone || undefined,
-      transaction_number,
-      customer_name,
-      payment_type,
-      created_at,
-      lineItems,
-      customerCharges,
-      final_price,
-      total_due: totalDue,
-      dp_amount,
-      status,
-      payments,
-    });
+  const buildThermalInput = (): ThermalNotaInput => ({
+    store_name,
+    store_address: store_address || undefined,
+    store_phone: store_phone || undefined,
+    transaction_number,
+    customer_name,
+    payment_type,
+    created_at,
+    lineItems,
+    customerCharges,
+    final_price,
+    total_due: totalDue,
+    dp_amount,
+    status,
+    payments,
+  });
+
+  const buildEscPosPayload = () => buildThermalNotaEscPos(buildThermalInput());
 
   /** Dialog sistem — di Android sering "layanan cetak dinonaktifkan". */
   const handlePrintNota = () => {
     if (androidClient || (!serialOk && mobileClient)) {
       toast.message(
-        'Peringatan "layanan cetak dinonaktifkan" = dialog Android, bukan bug app. Pakai Cetak Thermal (RawBT), bukan Cetak Sistem.',
+        'Peringatan "layanan cetak dinonaktifkan" = dialog Android. Pakai Cetak Thermal (bagikan gambar ke app printer gratis).',
         { duration: 12000 },
       );
       return;
@@ -169,25 +173,36 @@ export function NotaDocument({
   const handleThermalPrint = async () => {
     setPrintingThermal(true);
     try {
-      const payload = buildEscPosPayload();
       if (androidClient || (!serialOk && mobileClient)) {
-        printViaRawBt(payload);
-        toast.message(
-          "Membuka RawBT. Pastikan app terpasang, printer Bluetooth sudah di-pair di RawBT, lalu cetak.",
-          { duration: 10000 },
+        const mode = await shareOrDownloadThermalPng(
+          buildThermalInput(),
+          `NOTA-${transaction_number}.png`,
         );
+        if (mode === "shared") {
+          toast.message(
+            "Pilih app printer gratis (mis. Thermal Printer BT / PrinterMax), pair Bluetooth, lalu cetak gambar.",
+            { duration: 12000 },
+          );
+        } else {
+          toast.message(
+            "Gambar nota diunduh. Buka dengan app printer Bluetooth gratis, lalu cetak.",
+            { duration: 10000 },
+          );
+        }
         return;
       }
-      await printViaWebSerial(payload);
+      await printViaWebSerial(buildEscPosPayload());
       toast.success("Nota dikirim ke printer thermal");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      if (/NotFoundError|No port selected|cancelled/i.test(msg)) {
+      if (msg === "SHARE_CANCELLED") {
+        toast.message("Berbagi dibatalkan");
+      } else if (/NotFoundError|No port selected|cancelled/i.test(msg)) {
         toast.message("Pemilihan printer dibatalkan");
       } else {
         toast.error(
-          androidClient
-            ? "Gagal buka RawBT. Install RawBT dari Play Store, lalu coba lagi."
+          androidClient || mobileClient
+            ? "Gagal menyiapkan gambar nota. Coba lagi."
             : "Gagal cetak thermal. Pilih port COM/USB printer di dialog Chrome.",
         );
       }
@@ -196,16 +211,21 @@ export function NotaDocument({
     }
   };
 
-  const handleDownloadEscPos = () => {
+  const handleDownloadEscPos = async () => {
     try {
+      if (androidClient || mobileClient) {
+        const blob = await renderThermalNotaPngBlob(buildThermalInput());
+        downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
+        toast.success("Gambar nota diunduh (PNG)");
+        return;
+      }
       downloadEscPosFile(
         buildEscPosPayload(),
         `NOTA-${transaction_number}.bin`,
       );
-      toast.message(
-        "File .bin diunduh. Buka dengan RawBT jika intent cetak gagal.",
-        { duration: 9000 },
-      );
+      toast.message("File .bin diunduh untuk app ESC/POS.", {
+        duration: 7000,
+      });
     } catch {
       toast.error("Gagal membuat file thermal");
     }
@@ -234,16 +254,12 @@ export function NotaDocument({
             className="gap-1"
             title={
               androidClient || (!serialOk && mobileClient)
-                ? "Cetak via RawBT (Bluetooth Android)"
+                ? "Bagikan gambar nota ke app printer Bluetooth gratis"
                 : "Kirim ESC/POS via Web Serial (Chrome PC)"
             }
           >
             <Usb className="h-3.5 w-3.5" />
-            {printingThermal
-              ? "Menyiapkan..."
-              : androidClient || (!serialOk && mobileClient)
-                ? "Cetak Thermal"
-                : "Cetak Thermal"}
+            {printingThermal ? "Menyiapkan..." : "Cetak Thermal"}
           </Button>
         )}
         {!androidClient && (
@@ -261,12 +277,16 @@ export function NotaDocument({
         <Button
           size="sm"
           variant="outline"
-          onClick={() => handleDownloadEscPos()}
+          onClick={() => void handleDownloadEscPos()}
           className="gap-1"
-          title="Unduh ESC/POS untuk RawBT"
+          title={
+            androidClient || mobileClient
+              ? "Unduh gambar nota PNG"
+              : "Unduh ESC/POS .bin"
+          }
         >
           <Download className="h-3.5 w-3.5" />
-          File Thermal
+          {androidClient || mobileClient ? "Unduh Gambar" : "File Thermal"}
         </Button>
         <Button
           size="sm"
@@ -282,18 +302,11 @@ export function NotaDocument({
       <p className="mb-4 text-center text-xs text-muted-foreground">
         {androidClient || (!serialOk && mobileClient) ? (
           <>
-            Di Android jangan pakai Cetak Sistem (peringatan layanan cetak).
-            Install{" "}
-            <a
-              className="font-medium underline underline-offset-2"
-              href="https://play.google.com/store/apps/details?id=ru.a402d.rawbtprinter"
-              target="_blank"
-              rel="noreferrer"
-            >
-              RawBT
-            </a>
-            , pair printer Bluetooth di app itu, lalu ketuk{" "}
-            <span className="font-medium">Cetak Thermal</span>.
+            Android: <span className="font-medium">Cetak Thermal</span> membagikan
+            gambar nota (gratis). Install app printer Bluetooth gratis mis.{" "}
+            <span className="font-medium">Thermal Printer BT</span> atau{" "}
+            <span className="font-medium">PrinterMax</span>, pair printer, lalu
+            pilih app itu saat berbagi. Tidak perlu RawBT berbayar.
           </>
         ) : serialOk ? (
           <>
@@ -303,7 +316,7 @@ export function NotaDocument({
         ) : (
           <>
             Sambungkan printer di Chrome PC agar Cetak Thermal muncul, atau di
-            HP pakai RawBT.
+            HP bagikan gambar ke app printer gratis.
           </>
         )}
       </p>
