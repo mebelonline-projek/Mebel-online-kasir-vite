@@ -126,15 +126,15 @@ export function NotaDocument({
         money: formatCurrency,
       });
       toast.message(
-        "Di dialog cetak: pilih POS-58 → Setelan lain → kertas 58mm, margin minimum, skala 100%.",
+        "Di dialog cetak: pilih POS-58 → Setelan lain → kertas 58mm, margin minimum, skala 100%. Lalu ketuk Cetak.",
         { duration: 9000 },
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
-      if (msg === "POPUP_BLOCKED") {
-        toast.error("Izinkan popup untuk cetak nota, lalu coba lagi");
+      if (msg === "POPUP_BLOCKED" || msg === "PRINT_FRAME_FAILED") {
+        toast.error("Gagal membuka dialog cetak. Coba hard refresh lalu ulang.");
       } else {
-        toast.error("Gagal membuka jendela cetak");
+        toast.error("Gagal membuka dialog cetak");
       }
     }
   };
@@ -224,14 +224,14 @@ export function NotaDocument({
       </div>
       {mobileClient ? (
         <p className="mb-4 text-center text-xs text-muted-foreground">
-          Cetak Nota membuka jendela sempit. Di dialog: pilih printer
-          Bluetooth/POS-58, kertas 58mm, skala 100%.
+          Ketuk Cetak Nota → dialog cetak muncul. Pilih printer Bluetooth/POS-58,
+          kertas 58mm, skala 100%, lalu Cetak.
         </p>
       ) : (
         <p className="mb-4 text-center text-xs text-muted-foreground">
           Cetak Nota → pilih <span className="font-medium">POS-58</span> →
-          Setelan lain: kertas 58mm, margin minimum, skala 100% (jangan
-          fit-to-page).
+          Setelan lain: kertas 58mm, margin minimum, skala 100% → tombol Cetak.
+          Pastikan printer Bluetooth menyala dan terhubung di Windows.
         </p>
       )}
 

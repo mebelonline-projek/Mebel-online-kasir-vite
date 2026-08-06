@@ -1,7 +1,7 @@
 /**
- * Cetak nota ke printer POS-58 via jendela HTML sempit.
- * PDF 58mm di Chrome sering tampil sebagai garis putih di preview A4
- * (halaman PDF terlalu sempit vs kertas A4 default).
+ * Cetak nota ke printer POS-58 via HTML sempit (iframe, tanpa popup).
+ * PDF 58mm di Chrome sering jadi garis putih di preview A4.
+ * window.print() harus sinkron dari gesture klik — setTimeout sering diblokir.
  */
 
 export interface NotaPrintLineItem {
@@ -146,7 +146,7 @@ const PRINT_STYLES = `
     background: #fff;
     color: #000;
     font-family: "Courier New", Courier, monospace;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.35;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
@@ -158,16 +158,16 @@ const PRINT_STYLES = `
     padding: 2mm 1.5mm;
   }
   h1 {
-    font-size: 13px;
+    font-size: 14px;
     margin: 4px 0 2px;
     text-align: center;
     letter-spacing: 0.05em;
   }
   .center { text-align: center; }
   .bold { font-weight: 700; }
-  .muted { font-size: 10px; }
+  .muted { font-size: 11px; }
   .section {
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     margin: 2px 0 4px;
@@ -186,16 +186,8 @@ const PRINT_STYLES = `
   }
 `;
 
-/** Buka jendela sempit lalu dialog cetak — cocok untuk POS-58 di Chrome. */
-export function printNotaHtml(data: NotaPrintData): void {
-  const win = window.open("", "_blank", "width=320,height=720");
-  if (!win) {
-    throw new Error("POPUP_BLOCKED");
-  }
-
-  const body = buildReceiptHtml(data);
-  win.document.open();
-  win.document.write(`<!DOCTYPE html>
+function buildFullDocument(data: NotaPrintData): string {
+  return `<!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="utf-8" />
@@ -204,16 +196,48 @@ export function printNotaHtml(data: NotaPrintData): void {
   <style>${PRINT_STYLES}</style>
 </head>
 <body>
-  ${body}
-  <script>
-    window.onload = function () {
-      setTimeout(function () {
-        window.focus();
-        window.print();
-      }, 300);
-    };
-  </script>
+  ${buildReceiptHtml(data)}
 </body>
-</html>`);
-  win.document.close();
+</html>`;
+}
+
+/**
+ * Cetak via iframe tersembunyi — tidak butuh popup, print() dipanggil
+ * langsung dari gesture klik user (Chrome tidak memblokir).
+ */
+export function printNotaHtml(data: NotaPrintData): void {
+  const html = buildFullDocument(data);
+  const existing = document.getElementById("nota-print-frame");
+  existing?.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "nota-print-frame";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.cssText =
+    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  document.body.appendChild(iframe);
+
+  const frameWindow = iframe.contentWindow;
+  const frameDoc = iframe.contentDocument ?? frameWindow?.document;
+  if (!frameWindow || !frameDoc) {
+    iframe.remove();
+    throw new Error("PRINT_FRAME_FAILED");
+  }
+
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+
+  frameWindow.focus();
+  frameWindow.print();
+
+  // Hapus setelah dialog cetak ditutup / timeout
+  const cleanup = () => {
+    window.setTimeout(() => iframe.remove(), 1000);
+  };
+  if ("onafterprint" in frameWindow) {
+    frameWindow.addEventListener("afterprint", cleanup, { once: true });
+  } else {
+    cleanup();
+  }
 }
