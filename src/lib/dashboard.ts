@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { sumGoodsRevenueInRange } from "@/lib/customer-charges";
 import {
   addWibDays,
   getWibDateString,
@@ -197,12 +198,77 @@ async function fetchChartRawData(chartStart: Date, chartEnd: Date) {
     hppByTx.set(h.transaction_id, (hppByTx.get(h.transaction_id) || 0) + (h.amount || 0));
   }
 
+  const chargeTxIds = [
+    ...new Set([
+      ...allTx.map((t) => t.id),
+      ...extraTx.map((t) => t.id),
+      ...allPayments.map((p) => p.transaction_id),
+    ]),
+  ];
+  const chargesByTx = new Map<string, number>();
+  for (let i = 0; i < chargeTxIds.length; i += chunkSize) {
+    const chunk = chargeTxIds.slice(i, i + chunkSize);
+    const rows = await fetchAllRows<{ amount: number; transaction_id: string }>(
+      async (from, to) =>
+        supabase
+          .from("transaction_customer_charges")
+          .select("amount, transaction_id")
+          .in("transaction_id", chunk)
+          .order("transaction_id", { ascending: true })
+          .range(from, to)
+    );
+    for (const row of rows) {
+      chargesByTx.set(
+        row.transaction_id,
+        (chargesByTx.get(row.transaction_id) || 0) + (row.amount || 0)
+      );
+    }
+  }
+
+  // Riwayat bayar penuh per trx (untuk alokasi barang-dulu vs ongkir)
+  const paymentHistoryByTx = new Map<
+    string,
+    Array<{ amount: number; payment_date: string }>
+  >();
+  const txsNeedingHistory = [
+    ...new Set(
+      allPayments
+        .map((p) => p.transaction_id)
+        .filter((id) => (chargesByTx.get(id) || 0) > 0)
+    ),
+  ];
+  for (let i = 0; i < txsNeedingHistory.length; i += chunkSize) {
+    const chunk = txsNeedingHistory.slice(i, i + chunkSize);
+    const rows = await fetchAllRows<{
+      amount: number;
+      transaction_id: string;
+      payment_date: string;
+    }>(async (from, to) =>
+      supabase
+        .from("transaction_payments")
+        .select("amount, transaction_id, payment_date")
+        .in("transaction_id", chunk)
+        .order("payment_date", { ascending: true })
+        .range(from, to)
+    );
+    for (const row of rows) {
+      const list = paymentHistoryByTx.get(row.transaction_id) || [];
+      list.push({
+        amount: Number(row.amount) || 0,
+        payment_date: row.payment_date,
+      });
+      paymentHistoryByTx.set(row.transaction_id, list);
+    }
+  }
+
   return {
     allPayments,
     allTx,
     allOpCosts,
     finalPriceByTx,
     hppByTx,
+    chargesByTx,
+    paymentHistoryByTx,
   };
 }
 
@@ -217,20 +283,66 @@ function paymentTxStatus(transactions: unknown): string | undefined {
 function aggregatePaymentsInRange(
   payments: PaymentRow[],
   rangeStart: Date,
-  rangeEnd: Date
+  rangeEnd: Date,
+  finalPriceByTx: Map<string, number>,
+  chargesByTx: Map<string, number>,
+  paymentHistoryByTx: Map<string, Array<{ amount: number; payment_date: string }>>
 ): { revenue: number; paidByTx: Map<string, number> } {
   const rStart = rangeStart.getTime();
   const rEnd = rangeEnd.getTime();
   const paidByTx = new Map<string, number>();
   let revenue = 0;
 
+  const txIdsInRange = new Set<string>();
   for (const p of payments) {
     const d = new Date(p.payment_date).getTime();
     if (d < rStart || d > rEnd) continue;
     if (paymentTxStatus(p.transactions) === "BATAL") continue;
-    const amount = p.amount || 0;
-    revenue += amount;
-    paidByTx.set(p.transaction_id, (paidByTx.get(p.transaction_id) || 0) + amount);
+    txIdsInRange.add(p.transaction_id);
+  }
+
+  for (const txId of txIdsInRange) {
+    const charges = chargesByTx.get(txId) || 0;
+    const finalPrice = finalPriceByTx.get(txId) || 0;
+
+    if (charges <= 0) {
+      let goods = 0;
+      for (const p of payments) {
+        if (p.transaction_id !== txId) continue;
+        const d = new Date(p.payment_date).getTime();
+        if (d < rStart || d > rEnd) continue;
+        if (paymentTxStatus(p.transactions) === "BATAL") continue;
+        goods += p.amount || 0;
+      }
+      revenue += goods;
+      paidByTx.set(txId, goods);
+      continue;
+    }
+
+    const history =
+      paymentHistoryByTx.get(txId) ||
+      payments
+        .filter((p) => p.transaction_id === txId)
+        .map((p) => ({
+          amount: Number(p.amount) || 0,
+          payment_date: p.payment_date,
+        }))
+        .sort((a, b) =>
+          a.payment_date < b.payment_date
+            ? -1
+            : a.payment_date > b.payment_date
+              ? 1
+              : 0
+        );
+
+    const { goodsInRange } = sumGoodsRevenueInRange(
+      history,
+      finalPrice,
+      rStart,
+      rEnd
+    );
+    revenue += goodsInRange;
+    paidByTx.set(txId, goodsInRange);
   }
 
   return { revenue, paidByTx };
@@ -300,10 +412,19 @@ function computePeriodStat(
   allTx: TxRow[],
   hppByTx: Map<string, number>,
   finalPriceByTx: Map<string, number>,
+  chargesByTx: Map<string, number>,
+  paymentHistoryByTx: Map<string, Array<{ amount: number; payment_date: string }>>,
   rangeStart: Date,
   rangeEnd: Date
 ): PeriodStat {
-  const { revenue, paidByTx } = aggregatePaymentsInRange(payments, rangeStart, rangeEnd);
+  const { revenue, paidByTx } = aggregatePaymentsInRange(
+    payments,
+    rangeStart,
+    rangeEnd,
+    finalPriceByTx,
+    chargesByTx,
+    paymentHistoryByTx
+  );
   const hpp = sumProportionalHpp(paidByTx, hppByTx, finalPriceByTx);
   const grossProfit = revenue - hpp;
   const operationalCosts = aggregateOpCostsInRange(opCosts, rangeStart, rangeEnd);
@@ -373,27 +494,31 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
   const today = getWibDateString();
   const { kpiStart, kpiEnd, prevStart, prevEnd, chartStart, chartEnd } =
     getWibPeriodBounds(period);
-  const { allPayments, allTx, allOpCosts, finalPriceByTx, hppByTx } =
-    await fetchChartRawData(chartStart, chartEnd);
+  const {
+    allPayments,
+    allTx,
+    allOpCosts,
+    finalPriceByTx,
+    hppByTx,
+    chargesByTx,
+    paymentHistoryByTx,
+  } = await fetchChartRawData(chartStart, chartEnd);
 
-  const kpi = computePeriodStat(
-    allPayments,
-    allOpCosts,
-    allTx,
-    hppByTx,
-    finalPriceByTx,
-    kpiStart,
-    kpiEnd
-  );
-  const prev = computePeriodStat(
-    allPayments,
-    allOpCosts,
-    allTx,
-    hppByTx,
-    finalPriceByTx,
-    prevStart,
-    prevEnd
-  );
+  const periodStat = (rangeStart: Date, rangeEnd: Date) =>
+    computePeriodStat(
+      allPayments,
+      allOpCosts,
+      allTx,
+      hppByTx,
+      finalPriceByTx,
+      chargesByTx,
+      paymentHistoryByTx,
+      rangeStart,
+      rangeEnd
+    );
+
+  const kpi = periodStat(kpiStart, kpiEnd);
+  const prev = periodStat(prevStart, prevEnd);
 
   const revenueTrend = calcDashboardTrend(kpi.revenue, prev.revenue);
   const grossProfitTrend = calcDashboardTrend(kpi.grossProfit, prev.grossProfit);
@@ -424,15 +549,7 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const dateStr = addWibDays(today, -d);
       const s = wibToDate(wibStartISO(dateStr));
       const e = wibToDate(wibEndISO(dateStr));
-      const stat = computePeriodStat(
-        allPayments,
-        allOpCosts,
-        allTx,
-        hppByTx,
-        finalPriceByTx,
-        s,
-        e
-      );
+      const stat = periodStat(s, e);
       const { day, month } = parseWibDate(dateStr);
       monthlyData.push({
         month: dateStr,
@@ -455,15 +572,7 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const weekEndStr = addWibDays(weekStartStr, 6);
       const s = wibToDate(wibStartISO(weekStartStr));
       const e = wibToDate(wibEndISO(weekEndStr));
-      const stat = computePeriodStat(
-        allPayments,
-        allOpCosts,
-        allTx,
-        hppByTx,
-        finalPriceByTx,
-        s,
-        e
-      );
+      const stat = periodStat(s, e);
       const ws = parseWibDate(weekStartStr);
       const we = parseWibDate(weekEndStr);
       monthlyData.push({
@@ -490,15 +599,7 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const monthEndStr = getWibMonthEnd(monthStartStr);
       const s = wibToDate(wibStartISO(monthStartStr));
       const e = wibToDate(wibEndISO(monthEndStr));
-      const stat = computePeriodStat(
-        allPayments,
-        allOpCosts,
-        allTx,
-        hppByTx,
-        finalPriceByTx,
-        s,
-        e
-      );
+      const stat = periodStat(s, e);
       monthlyData.push({
         month: `${cy}-${String(cm).padStart(2, "0")}`,
         monthLabel: `${monthLabels[cm - 1]} ${cy}`,
@@ -516,15 +617,7 @@ async function computeDashboardStats(period: PeriodType): Promise<DashboardStats
       const year = currentYear - y;
       const s = wibToDate(wibStartISO(`${year}-01-01`));
       const e = wibToDate(wibEndISO(`${year}-12-31`));
-      const stat = computePeriodStat(
-        allPayments,
-        allOpCosts,
-        allTx,
-        hppByTx,
-        finalPriceByTx,
-        s,
-        e
-      );
+      const stat = periodStat(s, e);
       monthlyData.push({
         month: `${year}`,
         monthLabel: `${year}`,

@@ -69,7 +69,8 @@ export async function buildNotaPdfData(
       `
       *,
       transaction_payments (*),
-      transaction_items (*)
+      transaction_items (*),
+      transaction_customer_charges ( name, amount, sort_order )
     `
     )
     .eq("id", transactionId)
@@ -90,8 +91,25 @@ export async function buildNotaPdfData(
     note: string | null;
   }>;
 
+  const customerCharges = (
+    (transaction.transaction_customer_charges || []) as Array<{
+      name: string;
+      amount: number;
+      sort_order: number;
+    }>
+  )
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((c) => ({
+      name: c.name,
+      amount: Number(c.amount),
+    }));
+
+  const goodsPrice = Number(transaction.final_price);
+  const chargesTotal = customerCharges.reduce((s, c) => s + c.amount, 0);
+  const totalDue = goodsPrice + chargesTotal;
   const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const remainingAmount = Number(transaction.final_price) - totalPaid;
+  const remainingAmount = totalDue - totalPaid;
   const lineItems = mapTransactionLineItems(
     transaction.transaction_items as Array<{
       product_name: string;
@@ -103,7 +121,7 @@ export async function buildNotaPdfData(
     }> | null,
     {
       description: transaction.description,
-      final_price: Number(transaction.final_price),
+      final_price: goodsPrice,
     }
   );
 
@@ -122,7 +140,9 @@ export async function buildNotaPdfData(
     productDescription: null,
     description: transaction.description || null,
     lineItems,
-    finalPrice: Number(transaction.final_price),
+    customerCharges,
+    finalPrice: goodsPrice,
+    totalDue,
     paymentType: transaction.payment_type,
     dpAmount: Number(transaction.dp_amount || 0),
     totalPaid,

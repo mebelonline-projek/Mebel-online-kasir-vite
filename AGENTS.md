@@ -1,13 +1,12 @@
 # AGENTS.md — Konstitusi SPA Mebel Monitor
 
-Baca juga: [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) — **bagian “Lanjut besok”** dulu (antrian prioritas), lalu status tahap + path.
+Baca juga: [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) — **bagian “Keputusan produksi”** dan **“Lanjut besok”** dulu.
 
 ## Prioritas
 
-1. Jangan rusak produksi Next / data toko.
+1. Jangan rusak data toko / produksi SPA.
 2. Fitur kasir + offline benar.
-3. **UI harus sama persis dengan Next** sebelum cutover (syarat user).
-4. Hosting tetap gratis (Cloudflare Workers static + Supabase Free).
+3. Hosting tetap gratis (Cloudflare Workers static + Supabase Free).
 
 ## Stack
 
@@ -17,12 +16,14 @@ Baca juga: [MIGRATION-HANDOFF.md](./MIGRATION-HANDOFF.md) — **bagian “Lanjut
 - Deploy: `wrangler.jsonc` assets SPA → Cloudflare Workers
 - Edge privileged ops: Supabase Edge Functions saja
 
-## Sumber patokan UI & bisnis
+## Produksi = SPA saja (6 Agu 2026)
 
-Repo Next paralel: `../Aplikasi monitoring` (atau path Windows `C:\Users\USER\projek real\Aplikasi monitoring`).
+Klien sudah fully on SPA. **Jangan** update / port fitur ke repo Next.
 
-- Jangan tebak desain — **salin pola** dari Next (`globals.css`, layout, transaksi).
-- Entitas: Transaksi ≠ Nota ≠ Invoice (sama aturan AGENTS Next).
+- Live: Workers SPA
+- Next = arsip/cadangan darurat saja — bukan jalur pengembangan
+- Referensi UI/bisnis lama di `../Aplikasi monitoring` boleh dibaca untuk konteks historis, bukan untuk sync dua arah
+- Entitas: Transaksi ≠ Nota ≠ Invoice
 
 ## Aturan kode
 

@@ -1,41 +1,43 @@
 ---
-description: Migrasi SPA kasir — keputusan final, antrian lanjut, UI wajib sama dengan Next
+description: SPA kasir produksi — keputusan final; Next diarsipkan; jangan sync ke Next
 alwaysApply: true
 ---
 
-# Migrasi SPA — aturan wajib
+# SPA produksi — aturan wajib
 
-Sebelum coding, baca `MIGRATION-HANDOFF.md` — terutama bagian **Lanjut besok**.
+Sebelum coding, baca `MIGRATION-HANDOFF.md` — terutama **Keputusan produksi** dan **Lanjut besok**.
 
 ## Final decisions
 
-- SPA repo terpisah dari Next. Jangan rewrite Next in-place untuk migrasi.
-- DB: **Opsi C** — satu project Supabase bersama Next (bukan staging project ketiga di akun klien).
+- **Produksi = SPA saja** (klien fully on SPA per 6 Agu 2026).
+- **Jangan** update / port / sync fitur baru ke repo Next. Next = arsip/cadangan saja.
+- SPA repo terpisah dari Next. Jangan rewrite Next in-place.
+- DB: **Opsi C** — satu project Supabase (shared). Schema/SQL baru cukup di repo SPA + apply ke project yang sama.
 - Host: Cloudflare Workers **static assets / SPA** (`wrangler.jsonc`). Bukan Next SSR di Workers Free.
 - `service_role` hanya di Supabase Edge Functions.
 
-## UI (non-negotiable)
+## UI
 
-**UI SPA harus sama persis dengan app Next** sebelum cutover.
-Sumber: folder sibling `Aplikasi monitoring` (`globals.css`, layout, transaksi, dashboard).
-UI minimal = sementara. Jangan anggap selesai tanpa parity visual.
+UI patokan = SPA live yang dipakai klien. Repo Next boleh dibaca untuk konteks historis; **bukan** syarat “parity Next dulu” untuk fitur baru.
 
 ## Antrian default jika user bilang “lanjut”
 
-1. Cutover DNS domain toko → SPA **hanya jika user minta**; Next = fallback `v1-next-stable`.
-2. Uji PWA di HP fisik toko (opsional; Playwright mobile/SW sudah).
+1. Smoke biaya pembeli (ongkir) jika belum; data uji baru lalu hapus.
+2. Uji PWA di HP fisik toko (opsional).
+3. Cutover DNS domain toko → SPA **hanya jika user minta**.
 
-Smoke manage-users + transaksi (data uji lalu dibersihkan), redeploy Workers + `VITE_EDGE_MANAGE_USERS_URL` baked, PWA Playwright: **sudah**. Hosting online/offline sudah OK. Modul besar + UI parity + transaksi detail/list sudah. **Jangan mutasi data toko lama** saat uji. Jangan ulang uji hosting / fix cache Next kecuali diminta. Jangan ulang siklus `supabase login` → 401 token.
+Smoke manage-users + transaksi, redeploy Workers + `VITE_EDGE_MANAGE_USERS_URL`, PWA Playwright: **sudah** (sebelumnya). **Jangan mutasi data toko lama** saat uji. Jangan ulang uji hosting / fix cache Next kecuali diminta. Jangan ulang siklus `supabase login` → 401 token.
 
-## Fitur klien (Next selesai → SPA roadmap)
+## Fitur (semua di SPA; Next tidak dilanjutkan)
 
-- Search Gudang/Stok + varian parent/child: **sudah di Next + sudah di SPA**.
-- Tanggal custom transaksi (create only): **sudah di Next + sudah di SPA**.
-- Upload foto barang: **sudah di Next + sudah di SPA**.
-- Nota/PDF + HPP per transaksi: **sudah di Next + sudah di SPA**.
-- Dashboard keuangan (trend/HPP/MTD): **sudah di Next + sudah di SPA**.
-- Transaksi detail/list parity (edit DP, fulfillment, hapus, WA, CSV): **sudah di Next + sudah di SPA**.
-- Stok/kasir/Edge tetap per `product_id` (leaf). Jangan pecah skema hanya di satu repo.
+- Search Gudang/Stok + varian parent/child: SPA
+- Tanggal custom transaksi (create only): SPA
+- Upload foto barang: SPA
+- Nota/PDF + HPP per transaksi: SPA
+- Dashboard keuangan (trend/HPP/MTD): SPA
+- Transaksi detail/list parity: SPA
+- Biaya dibebankan ke pembeli (ongkir): SPA — `transaction_customer_charges`; masuk nota, bukan omzet
+- Stok/kasir/Edge tetap per `product_id` (leaf)
 
 ## Preferensi sesi
 

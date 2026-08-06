@@ -13,6 +13,13 @@ import {
   getCachedCustomers,
   refreshCatalogCache,
 } from "@/lib/catalog-cache";
+import {
+  createEmptyCustomerCharges,
+  CustomerChargesEditor,
+  customerChargesTotal,
+  toCustomerChargePayload,
+  type CustomerChargeLine,
+} from "@/components/transactions/customer-charges-editor";
 import { emitDataChanged } from "@/lib/data-events";
 import { formatCurrency } from "@/lib/formatters";
 import { parseRupiahInteger } from "@/lib/money";
@@ -42,6 +49,9 @@ export function TransaksiEditPage() {
     "TUNAI"
   );
   const [dpAmount, setDpAmount] = useState("");
+  const [customerCharges, setCustomerCharges] = useState<CustomerChargeLine[]>(
+    createEmptyCustomerCharges
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -85,6 +95,13 @@ export function TransaksiEditPage() {
           ? String(result.data.dp_amount)
           : ""
       );
+      setCustomerCharges(
+        (result.data.transaction_customer_charges || []).map((c) => ({
+          key: c.id,
+          name: c.name,
+          amount: String(c.amount),
+        }))
+      );
       const firstPay = result.data.transaction_payments[0];
       if (firstPay?.method === "TRANSFER" || firstPay?.method === "TUNAI") {
         setPaymentMethod(firstPay.method);
@@ -108,8 +125,10 @@ export function TransaksiEditPage() {
   );
 
   const finalPriceNum = Number(finalPrice) || 0;
+  const chargesTotal = customerChargesTotal(customerCharges);
+  const totalDue = finalPriceNum + chargesTotal;
   const dpAmountNum = Number(dpAmount) || 0;
-  const remaining = Math.max(0, finalPriceNum - dpAmountNum);
+  const remaining = Math.max(0, totalDue - dpAmountNum);
   const isDp = paymentType === "DP";
 
   async function onSubmit(e: React.FormEvent) {
@@ -143,6 +162,7 @@ export function TransaksiEditPage() {
       payment_type: paymentType,
       payment_method: paymentMethod,
       dp_amount: dp,
+      customer_charges: toCustomerChargePayload(customerCharges),
     };
 
     const parsed = transactionSchema.safeParse(payload);
@@ -226,7 +246,7 @@ export function TransaksiEditPage() {
 
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">
-                  Harga Jual <span className="text-destructive">*</span>
+                  Harga Jual (barang) <span className="text-destructive">*</span>
                 </label>
                 <CurrencyInput
                   value={finalPrice}
@@ -242,6 +262,20 @@ export function TransaksiEditPage() {
                   </p>
                 )}
               </div>
+
+              <CustomerChargesEditor
+                charges={customerCharges}
+                onChange={setCustomerCharges}
+              />
+
+              {totalDue > 0 && (
+                <p className="text-sm text-muted-foreground">
+                  Total tagihan:{" "}
+                  <span className="font-semibold text-foreground">
+                    {formatCurrency(totalDue)}
+                  </span>
+                </p>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">
@@ -278,7 +312,7 @@ export function TransaksiEditPage() {
                   <CurrencyInput
                     value={dpAmount}
                     onChange={setDpAmount}
-                    placeholder={`Min Rp 1, maks ${formatCurrency(Math.max(0, finalPriceNum - 1))}`}
+                    placeholder={`Min Rp 1, maks ${formatCurrency(Math.max(0, totalDue - 1))}`}
                     className={
                       fieldErrors.dp_amount ? "border-destructive" : ""
                     }
@@ -288,7 +322,7 @@ export function TransaksiEditPage() {
                       {fieldErrors.dp_amount}
                     </p>
                   )}
-                  {finalPriceNum > 0 && dpAmountNum > 0 && !fieldErrors.dp_amount && (
+                  {totalDue > 0 && dpAmountNum > 0 && !fieldErrors.dp_amount && (
                     <p className="text-xs text-muted-foreground">
                       Sisa tagihan: {formatCurrency(remaining)}
                     </p>

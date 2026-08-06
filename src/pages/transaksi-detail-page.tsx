@@ -49,6 +49,7 @@ import { FULFILLMENT_STATUSES } from "@/config/fulfillment";
 import { useAuth } from "@/contexts/auth-context";
 import { emitDataChanged } from "@/lib/data-events";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { totalTagihan } from "@/lib/customer-charges";
 import {
   deleteTransactionPermanent,
   getTransactionById,
@@ -107,9 +108,10 @@ export function TransaksiDetailPage() {
   }, [id, navigate]);
 
   const totals = useMemo(() => {
-    if (!tx) return { paid: 0, remaining: 0 };
+    if (!tx) return { paid: 0, remaining: 0, due: 0 };
     const paid = tx.transaction_payments.reduce((s, p) => s + p.amount, 0);
-    return { paid, remaining: Math.max(0, tx.final_price - paid) };
+    const due = totalTagihan(tx.final_price, tx.transaction_customer_charges);
+    return { paid, remaining: Math.max(0, due - paid), due };
   }, [tx]);
 
   const canEdit = tx?.status === "DP";
@@ -129,7 +131,7 @@ export function TransaksiDetailPage() {
     if (!tx) return;
     const customer = tx.customer_name || "Pelanggan";
     const amount =
-      totals.remaining > 0 ? totals.remaining : tx.final_price;
+      totals.remaining > 0 ? totals.remaining : totals.due;
     const text = encodeURIComponent(
       `Halo ${customer}, reminder tagihan ${tx.transaction_number} sebesar ${formatCurrency(amount)}. Terima kasih.`
     );
@@ -330,11 +332,18 @@ export function TransaksiDetailPage() {
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                    Harga Jual
+                    {tx.transaction_customer_charges.length > 0
+                      ? "Total Tagihan"
+                      : "Harga Jual"}
                   </p>
                   <p className="text-xl font-bold text-primary">
-                    {formatCurrency(tx.final_price)}
+                    {formatCurrency(totals.due)}
                   </p>
+                  {tx.transaction_customer_charges.length > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Barang {formatCurrency(tx.final_price)} + biaya pembeli
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="mb-1 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
@@ -394,6 +403,30 @@ export function TransaksiDetailPage() {
                       <p className="font-semibold">
                         {formatCurrency(item.line_total)}
                       </p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {tx.transaction_customer_charges.length > 0 && (
+            <Card className="shadow-sm">
+              <CardContent className="p-6">
+                <h3 className="mb-1 text-lg font-bold">
+                  Biaya dibebankan ke pembeli
+                </h3>
+                <p className="mb-4 text-xs text-muted-foreground">
+                  Masuk nota — tidak dihitung omzet dashboard
+                </p>
+                <div className="space-y-2">
+                  {tx.transaction_customer_charges.map((c) => (
+                    <div
+                      key={c.id}
+                      className="flex items-start justify-between rounded-lg border border-border bg-accent/30 p-3"
+                    >
+                      <p className="font-semibold">{c.name}</p>
+                      <p className="font-semibold">{formatCurrency(c.amount)}</p>
                     </div>
                   ))}
                 </div>
@@ -512,9 +545,25 @@ export function TransaksiDetailPage() {
               <h3 className="mb-4 text-lg font-bold">Ringkasan Pembayaran</h3>
               <div className="space-y-3">
                 <div className="flex justify-between">
+                  <span className="text-muted-foreground">Harga barang</span>
+                  <span className="font-semibold">
+                    {formatCurrency(tx.final_price)}
+                  </span>
+                </div>
+                {tx.transaction_customer_charges.length > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Biaya pembeli</span>
+                    <span className="font-semibold">
+                      {formatCurrency(
+                        totals.due - tx.final_price
+                      )}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between">
                   <span className="text-muted-foreground">Total Tagihan</span>
                   <span className="font-bold">
-                    {formatCurrency(tx.final_price)}
+                    {formatCurrency(totals.due)}
                   </span>
                 </div>
                 <div className="flex justify-between">

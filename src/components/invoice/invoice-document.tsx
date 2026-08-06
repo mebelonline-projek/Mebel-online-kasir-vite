@@ -31,7 +31,11 @@ export interface InvoiceData {
   productDescription: string | null;
   description: string | null;
   lineItems?: InvoiceLineItem[];
+  customerCharges?: Array<{ name: string; amount: number }>;
+  /** Harga barang saja */
   finalPrice: number;
+  /** Total tagihan (barang + biaya pembeli). Default = finalPrice */
+  totalDue?: number;
   paymentType: string;
   dpAmount: number;
   totalPaid: number;
@@ -303,8 +307,20 @@ export function InvoiceDocument({ data }: { data: InvoiceData }) {
 
         <View style={styles.summary}>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total Pesanan</Text>
+            <Text style={styles.summaryLabel}>Subtotal barang</Text>
             <Text style={styles.summaryValue}>{fmt(data.finalPrice)}</Text>
+          </View>
+          {(data.customerCharges || []).map((c, i) => (
+            <View key={`${c.name}-${i}`} style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>{c.name}</Text>
+              <Text style={styles.summaryValue}>{fmt(c.amount)}</Text>
+            </View>
+          ))}
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Total Tagihan</Text>
+            <Text style={styles.summaryValue}>
+              {fmt(data.totalDue ?? data.finalPrice)}
+            </Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Total Dibayar</Text>

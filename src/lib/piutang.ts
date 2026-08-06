@@ -1,4 +1,5 @@
 import type { ActionState } from "@/types/common";
+import { totalTagihan } from "@/lib/customer-charges";
 import { supabase } from "@/lib/supabase";
 
 export interface PiutangRow {
@@ -50,12 +51,24 @@ export async function getPiutangPageData(): Promise<
     if (error) return { success: false, message: error.message };
 
     const txIds = (transactions || []).map((t) => t.id);
-    const { data: payments } = txIds.length
-      ? await supabase
-          .from("transaction_payments")
-          .select("transaction_id, amount")
-          .in("transaction_id", txIds)
-      : { data: [] as { transaction_id: string; amount: number }[] };
+    const [{ data: payments }, { data: charges }] = await Promise.all([
+      txIds.length
+        ? supabase
+            .from("transaction_payments")
+            .select("transaction_id, amount")
+            .in("transaction_id", txIds)
+        : Promise.resolve({
+            data: [] as { transaction_id: string; amount: number }[],
+          }),
+      txIds.length
+        ? supabase
+            .from("transaction_customer_charges")
+            .select("transaction_id, amount")
+            .in("transaction_id", txIds)
+        : Promise.resolve({
+            data: [] as { transaction_id: string; amount: number }[],
+          }),
+    ]);
 
     const paidMap = new Map<string, number>();
     for (const p of payments || []) {
@@ -65,15 +78,26 @@ export async function getPiutangPageData(): Promise<
       );
     }
 
+    const chargesMap = new Map<string, number>();
+    for (const c of charges || []) {
+      chargesMap.set(
+        c.transaction_id,
+        (chargesMap.get(c.transaction_id) || 0) + Number(c.amount)
+      );
+    }
+
     const piutangList = (transactions || [])
       .map((tx) => {
         const paid = paidMap.get(tx.id) || 0;
-        const remaining = Number(tx.final_price) - paid;
+        const due = totalTagihan(Number(tx.final_price), [
+          { amount: chargesMap.get(tx.id) || 0 },
+        ]);
+        const remaining = due - paid;
         return {
           id: tx.id,
           transaction_number: tx.transaction_number,
           customer_name: tx.customer_name,
-          final_price: Number(tx.final_price),
+          final_price: due,
           status: tx.status,
           created_at: tx.created_at,
           paid,

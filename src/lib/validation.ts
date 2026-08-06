@@ -41,6 +41,28 @@ export const transactionItemSchema = z.object({
 
 export type TransactionItemFormValues = z.infer<typeof transactionItemSchema>;
 
+/** Biaya dibebankan ke pembeli (ongkir dll) — masuk nota, bukan omzet. */
+export const customerChargeSchema = z.object({
+  name: z.string().min(1, "Nama biaya wajib").max(100),
+  amount: z.coerce
+    .number()
+    .min(1, "Nominal biaya harus lebih dari 0")
+    .max(999_999_999, "Nominal terlalu besar"),
+});
+
+export type CustomerChargeFormValues = z.infer<typeof customerChargeSchema>;
+
+function totalTagihanFromForm(data: {
+  final_price: number;
+  customer_charges?: CustomerChargeFormValues[];
+}): number {
+  const charges = (data.customer_charges || []).reduce(
+    (sum, c) => sum + (Number(c.amount) || 0),
+    0
+  );
+  return Number(data.final_price) + charges;
+}
+
 export const transactionCreateSchema = z
   .object({
     customer_id: optionalDbId(),
@@ -66,18 +88,20 @@ export const transactionCreateSchema = z
     client_id: dbId().optional(),
     dp_amount: z.coerce.number().min(0, "DP tidak boleh negatif").default(0),
     items: z.array(transactionItemSchema).optional(),
+    customer_charges: z.array(customerChargeSchema).optional(),
     /** Tanggal bisnis (YYYY-MM-DD). Kosong = hari ini WIB. Hanya untuk create. */
     transaction_date: z.union([z.iso.date(), z.literal("")]).optional(),
   })
   .refine(
     (data) => {
       if (data.payment_type === "DP") {
-        return data.dp_amount > 0 && data.dp_amount < data.final_price;
+        const due = totalTagihanFromForm(data);
+        return data.dp_amount > 0 && data.dp_amount < due;
       }
       return true;
     },
     {
-      message: "DP harus lebih dari 0 dan kurang dari harga final",
+      message: "DP harus lebih dari 0 dan kurang dari total tagihan",
       path: ["dp_amount"],
     }
   )
@@ -119,16 +143,18 @@ export const transactionSchema = z
     payment_type: z.enum(["CASH", "DP"], { error: "Pilih tipe pembayaran" }),
     payment_method: z.enum(["TUNAI", "TRANSFER"]).default("TUNAI"),
     dp_amount: z.coerce.number().min(0, "DP tidak boleh negatif").default(0),
+    customer_charges: z.array(customerChargeSchema).optional(),
   })
   .refine(
     (data) => {
       if (data.payment_type === "DP") {
-        return data.dp_amount > 0 && data.dp_amount < data.final_price;
+        const due = totalTagihanFromForm(data);
+        return data.dp_amount > 0 && data.dp_amount < due;
       }
       return true;
     },
     {
-      message: "DP harus lebih dari 0 dan kurang dari harga final",
+      message: "DP harus lebih dari 0 dan kurang dari total tagihan",
       path: ["dp_amount"],
     }
   );

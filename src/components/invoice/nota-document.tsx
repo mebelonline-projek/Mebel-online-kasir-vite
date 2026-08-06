@@ -21,11 +21,17 @@ interface PaymentItem {
   note: string | null;
 }
 
+interface CustomerChargeItem {
+  name: string;
+  amount: number;
+}
+
 interface NotaProps {
   transaction_id: string;
   transaction_number: string;
   customer_name: string;
   lineItems: InvoiceLineItem[];
+  customerCharges?: CustomerChargeItem[];
   final_price: number;
   payment_type: string;
   dp_amount: number;
@@ -43,6 +49,7 @@ export function NotaDocument({
   transaction_number,
   customer_name,
   lineItems,
+  customerCharges = [],
   final_price,
   payment_type,
   dp_amount,
@@ -101,7 +108,9 @@ export function NotaDocument({
         payment_type,
         created_at,
         lineItems,
+        customerCharges,
         final_price,
+        total_due: totalDue,
         dp_amount,
         status,
         payments,
@@ -123,7 +132,9 @@ export function NotaDocument({
   };
 
   const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-  const remaining = final_price - totalPaid;
+  const chargesTotal = customerCharges.reduce((sum, c) => sum + c.amount, 0);
+  const totalDue = final_price + chargesTotal;
+  const remaining = totalDue - totalPaid;
   const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
 
   return (
@@ -278,7 +289,7 @@ export function NotaDocument({
                   colSpan={3}
                   className="py-2 text-right font-semibold text-gray-600"
                 >
-                  Total ({lineItems.length} item)
+                  Subtotal barang ({lineItems.length} item)
                 </td>
                 <td className="py-2 text-right text-base font-bold">
                   {formatCurrency(itemsSubtotal || final_price)}
@@ -288,6 +299,31 @@ export function NotaDocument({
           </table>
         </div>
 
+        {customerCharges.length > 0 && (
+          <div className="mb-4">
+            <h3 className="mb-2 text-xs font-bold tracking-wider text-gray-500 uppercase">
+              Biaya dibebankan ke pembeli
+            </h3>
+            <table className="w-full border-collapse text-xs">
+              <tbody>
+                {customerCharges.map((c, index) => (
+                  <tr
+                    key={`${c.name}-${index}`}
+                    className="border-b border-gray-100"
+                  >
+                    <td className="py-2 pr-2 font-medium text-gray-900">
+                      {c.name}
+                    </td>
+                    <td className="whitespace-nowrap py-2 pl-1 text-right font-semibold">
+                      {formatCurrency(c.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         <div className="my-4 border-t border-dashed border-gray-300" />
 
         <table className="w-full border-collapse text-sm">
@@ -295,7 +331,7 @@ export function NotaDocument({
             <tr className="border-b border-gray-200">
               <td className="py-2 text-gray-600">Total Tagihan</td>
               <td className="py-2 text-right font-bold">
-                {formatCurrency(final_price)}
+                {formatCurrency(totalDue)}
               </td>
             </tr>
             {payment_type === "DP" && (

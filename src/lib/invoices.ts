@@ -1,4 +1,5 @@
 import type { ActionState } from "@/types/common";
+import { totalTagihan } from "@/lib/customer-charges";
 import { supabase } from "@/lib/supabase";
 
 export interface InvoiceListItem {
@@ -248,7 +249,27 @@ export async function createInvoice(input: {
       };
     }
 
-    const totalAmount = txs.reduce((sum, t) => sum + t.final_price, 0);
+    const { data: chargeRows } = await supabase
+      .from("transaction_customer_charges")
+      .select("transaction_id, amount")
+      .in("transaction_id", input.transaction_ids);
+
+    const chargesByTx = new Map<string, number>();
+    for (const c of chargeRows || []) {
+      chargesByTx.set(
+        c.transaction_id,
+        (chargesByTx.get(c.transaction_id) || 0) + Number(c.amount || 0)
+      );
+    }
+
+    const totalAmount = txs.reduce(
+      (sum, t) =>
+        sum +
+        totalTagihan(Number(t.final_price), [
+          { amount: chargesByTx.get(t.id) || 0 },
+        ]),
+      0
+    );
 
     const { data: payments } = await supabase
       .from("transaction_payments")
@@ -366,18 +387,25 @@ export async function getEligibleInvoiceTransactions(): Promise<
   ActionState<EligibleInvoiceTransaction[]>
 > {
   try {
-    const [{ data: txs, error: txErr }, { data: linked }, { data: payments }] =
-      await Promise.all([
-        supabase
-          .from("transactions")
-          .select(
-            "id, transaction_number, final_price, status, created_at, customer_name"
-          )
-          .in("status", ["DP", "MENUNGGU_PELUNASAN"])
-          .order("created_at", { ascending: false }),
-        supabase.from("invoice_items").select("transaction_id"),
-        supabase.from("transaction_payments").select("transaction_id, amount"),
-      ]);
+    const [
+      { data: txs, error: txErr },
+      { data: linked },
+      { data: payments },
+      { data: charges },
+    ] = await Promise.all([
+      supabase
+        .from("transactions")
+        .select(
+          "id, transaction_number, final_price, status, created_at, customer_name"
+        )
+        .in("status", ["DP", "MENUNGGU_PELUNASAN"])
+        .order("created_at", { ascending: false }),
+      supabase.from("invoice_items").select("transaction_id"),
+      supabase.from("transaction_payments").select("transaction_id, amount"),
+      supabase
+        .from("transaction_customer_charges")
+        .select("transaction_id, amount"),
+    ]);
 
     if (txErr) return { success: false, message: txErr.message };
 
@@ -389,13 +417,26 @@ export async function getEligibleInvoiceTransactions(): Promise<
         (paidByTx.get(p.transaction_id) || 0) + p.amount
       );
     }
+    const chargesByTx = new Map<string, number>();
+    for (const c of charges || []) {
+      chargesByTx.set(
+        c.transaction_id,
+        (chargesByTx.get(c.transaction_id) || 0) + Number(c.amount || 0)
+      );
+    }
 
     const available = (txs || [])
       .filter((t) => !linkedIds.has(t.id))
-      .map((t) => ({
-        ...t,
-        remaining: t.final_price - (paidByTx.get(t.id) || 0),
-      }))
+      .map((t) => {
+        const due = totalTagihan(Number(t.final_price), [
+          { amount: chargesByTx.get(t.id) || 0 },
+        ]);
+        return {
+          ...t,
+          final_price: due,
+          remaining: due - (paidByTx.get(t.id) || 0),
+        };
+      })
       .filter((t) => t.remaining > 0);
 
     return { success: true, data: available };

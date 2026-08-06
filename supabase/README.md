@@ -20,9 +20,14 @@ Tidak bisa menambah project ketiga di akun yang sama.
 - Uji sangat hati-hati (data produksi).
 - Jangan eksperimen destruktif di SQL produksi.
 
-### Realtime multi-device (wajib untuk SPA kencang antar HP/PC)
+### Biaya dibebankan ke pembeli (`transaction_customer_charges`)
 
-Jalankan sekali di SQL Editor project shared:
+Jalankan sekali di SQL Editor (project bersama):
+
+- File: `supabase/migrate_customer_charges.sql`
+
+Ongkir & biaya serupa masuk nota + total tagihan, **tidak** masuk omzet dashboard.
+
 
 ```sql
 alter publication supabase_realtime add table public.transactions;

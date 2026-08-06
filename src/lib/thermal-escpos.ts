@@ -36,7 +36,10 @@ export interface ThermalNotaInput {
   payment_type: string;
   created_at: string;
   lineItems: InvoiceLineItem[];
+  customerCharges?: Array<{ name: string; amount: number }>;
   final_price: number;
+  /** Total tagihan; default final_price + charges */
+  total_due?: number;
   dp_amount: number;
   status: string;
   payments: ThermalNotaPayment[];
@@ -133,7 +136,11 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
   push(line(dashLine()));
 
   const totalPaid = data.payments.reduce((s, p) => s + p.amount, 0);
-  const remaining = data.final_price - totalPaid;
+  const charges = data.customerCharges || [];
+  const totalDue =
+    data.total_due ??
+    data.final_price + charges.reduce((s, c) => s + c.amount, 0);
+  const remaining = totalDue - totalPaid;
 
   for (const item of data.lineItems) {
     push(line(item.product_name.slice(0, THERMAL_COLS)));
@@ -150,8 +157,15 @@ export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
     );
   }
 
+  if (charges.length > 0) {
+    push(line(dashLine()));
+    for (const c of charges) {
+      push(line(pairLine(c.name.slice(0, 18), money(c.amount))));
+    }
+  }
+
   push(line(dashLine()));
-  push(line(pairLine("Total tagihan", money(data.final_price))));
+  push(line(pairLine("Total tagihan", money(totalDue))));
   if (data.payment_type === "DP") {
     push(line(pairLine("DP awal", money(data.dp_amount))));
   }

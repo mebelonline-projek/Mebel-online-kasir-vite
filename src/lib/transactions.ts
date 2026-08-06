@@ -12,6 +12,9 @@ import {
   type PaymentFormValues,
 } from "@/lib/validation";
 import { supabase } from "@/lib/supabase";
+import {
+  totalTagihan,
+} from "@/lib/customer-charges";
 import { toRupiahInteger } from "@/lib/money";
 import { getWibDateString, wibNoonISO } from "@/lib/date-utils";
 
@@ -55,6 +58,13 @@ export interface TransactionHppItem {
   created_at?: string;
 }
 
+export interface TransactionCustomerCharge {
+  id: string;
+  name: string;
+  amount: number;
+  sort_order: number;
+}
+
 export interface TransactionDetail {
   id: string;
   transaction_number: string;
@@ -71,8 +81,32 @@ export interface TransactionDetail {
   void_reason: string | null;
   void_at: string | null;
   transaction_items: TransactionItemDetail[];
+  transaction_customer_charges: TransactionCustomerCharge[];
   transaction_payments: TransactionPaymentRow[];
   hpp_items: TransactionHppItem[];
+}
+
+async function fetchChargesTotalByTxIds(
+  txIds: string[]
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (txIds.length === 0) return map;
+
+  const chunkSize = 200;
+  for (let i = 0; i < txIds.length; i += chunkSize) {
+    const chunk = txIds.slice(i, i + chunkSize);
+    const { data } = await supabase
+      .from("transaction_customer_charges")
+      .select("transaction_id, amount")
+      .in("transaction_id", chunk);
+    for (const row of data || []) {
+      map.set(
+        row.transaction_id,
+        (map.get(row.transaction_id) || 0) + Number(row.amount || 0)
+      );
+    }
+  }
+  return map;
 }
 
 async function restoreSaleStockViaEdge(
@@ -158,6 +192,7 @@ async function syncLinkedInvoiceTotals(transactionIds: string[]): Promise<void> 
       supabase.from("invoices").select("id, status").in("id", invoiceIds),
     ]);
 
+  const chargesByTx = await fetchChargesTotalByTxIds(allTxIds);
   const txMap = new Map((allTx || []).map((t) => [t.id, t]));
   const invStatusMap = new Map((allInvoices || []).map((i) => [i.id, i.status]));
 
@@ -186,7 +221,10 @@ async function syncLinkedInvoiceTotals(transactionIds: string[]): Promise<void> 
       }
 
       const totalAmount = validTxIds.reduce(
-        (sum, tid) => sum + Number(txMap.get(tid)?.final_price || 0),
+        (sum, tid) =>
+          sum +
+          Number(txMap.get(tid)?.final_price || 0) +
+          (chargesByTx.get(tid) || 0),
         0
       );
       const totalPaid = (allPayments || [])
@@ -249,8 +287,6 @@ export async function createTransaction(
     }
 
     const data = parsed.data;
-    const isCash = data.payment_type === "CASH";
-    const status = isCash ? "LUNAS" : "DP";
     const businessDate =
       data.transaction_date && data.transaction_date.length > 0
         ? data.transaction_date
@@ -269,7 +305,17 @@ export async function createTransaction(
     const finalPrice = toRupiahInteger(
       itemsTotal > 0 ? itemsTotal : data.final_price
     );
-    const dpAmount = toRupiahInteger(isCash ? finalPrice : data.dp_amount);
+    const chargeRows = (data.customer_charges || [])
+      .filter((c) => c.name.trim() && Number(c.amount) > 0)
+      .map((c, index) => ({
+        name: c.name.trim(),
+        amount: toRupiahInteger(c.amount),
+        sort_order: index,
+      }));
+    const dueTotal = totalTagihan(finalPrice, chargeRows);
+    const isCash = data.payment_type === "CASH";
+    const status = isCash ? "LUNAS" : "DP";
+    const dpAmount = toRupiahInteger(isCash ? dueTotal : data.dp_amount);
     const description =
       data.items && data.items.length > 0
         ? data.items.map((i) => i.product_name).join(", ")
@@ -281,8 +327,11 @@ export async function createTransaction(
           ? data.product_id
           : null;
 
-    if (data.payment_type === "DP" && data.dp_amount >= finalPrice) {
-      return { success: false, message: "DP harus kurang dari harga final" };
+    if (data.payment_type === "DP" && data.dp_amount >= dueTotal) {
+      return {
+        success: false,
+        message: "DP harus kurang dari total tagihan",
+      };
     }
 
     if (data.client_id) {
@@ -432,6 +481,26 @@ export async function createTransaction(
       }
     }
 
+    if (chargeRows.length > 0) {
+      const { error: chargesError } = await supabase
+        .from("transaction_customer_charges")
+        .insert(
+          chargeRows.map((c) => ({
+            transaction_id: transaction.id,
+            name: c.name,
+            amount: c.amount,
+            sort_order: c.sort_order,
+          }))
+        );
+      if (chargesError) {
+        await supabase.from("transactions").delete().eq("id", transaction.id);
+        return {
+          success: false,
+          message: `Gagal menyimpan biaya pembeli: ${chargesError.message}`,
+        };
+      }
+    }
+
     const paymentAmount = dpAmount;
     const paymentMethod = data.payment_method || "TUNAI";
     const { error: payError } = await supabase
@@ -508,6 +577,7 @@ export async function getTransactionById(
         payment_type, dp_amount, status, fulfillment_status, created_at,
         void_reason, void_at,
         transaction_items ( id, product_name, quantity, unit_price, line_total, note, sort_order ),
+        transaction_customer_charges ( id, name, amount, sort_order ),
         transaction_payments ( id, amount, payment_date, method, note ),
         hpp_items ( id, name, amount, note, created_at )
       `
@@ -523,6 +593,18 @@ export async function getTransactionById(
     )
       .slice()
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+    const charges = (
+      (data.transaction_customer_charges as
+        | TransactionCustomerCharge[]
+        | null) || []
+    )
+      .slice()
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map((c) => ({
+        ...c,
+        amount: Number(c.amount),
+      }));
 
     const payments = (
       (data.transaction_payments as TransactionPaymentRow[] | null) || []
@@ -566,6 +648,7 @@ export async function getTransactionById(
           unit_price: Number(i.unit_price),
           line_total: Number(i.line_total),
         })),
+        transaction_customer_charges: charges,
         transaction_payments: payments.map((p) => ({
           ...p,
           amount: Number(p.amount),
@@ -710,8 +793,23 @@ export async function updateTransaction(
     const data = parsed.data;
     const isCash = data.payment_type === "CASH";
     const finalPrice = toRupiahInteger(data.final_price);
-    const dpAmount = toRupiahInteger(isCash ? finalPrice : data.dp_amount);
+    const chargeRows = (data.customer_charges || [])
+      .filter((c) => c.name.trim() && Number(c.amount) > 0)
+      .map((c, index) => ({
+        name: c.name.trim(),
+        amount: toRupiahInteger(c.amount),
+        sort_order: index,
+      }));
+    const dueTotal = totalTagihan(finalPrice, chargeRows);
+    const dpAmount = toRupiahInteger(isCash ? dueTotal : data.dp_amount);
     const newStatus = isCash ? "LUNAS" : "DP";
+
+    if (!isCash && data.dp_amount >= dueTotal) {
+      return {
+        success: false,
+        message: "DP harus kurang dari total tagihan",
+      };
+    }
 
     const { error: updateError } = await supabase
       .from("transactions")
@@ -735,6 +833,30 @@ export async function updateTransaction(
       .eq("id", id);
 
     if (updateError) return { success: false, message: updateError.message };
+
+    await supabase
+      .from("transaction_customer_charges")
+      .delete()
+      .eq("transaction_id", id);
+
+    if (chargeRows.length > 0) {
+      const { error: chargesError } = await supabase
+        .from("transaction_customer_charges")
+        .insert(
+          chargeRows.map((c) => ({
+            transaction_id: id,
+            name: c.name,
+            amount: c.amount,
+            sort_order: c.sort_order,
+          }))
+        );
+      if (chargesError) {
+        return {
+          success: false,
+          message: `Gagal menyimpan biaya pembeli: ${chargesError.message}`,
+        };
+      }
+    }
 
     const paymentAmount = dpAmount;
     const existingPaymentsList = existingPayments || [];
@@ -1008,11 +1130,17 @@ export async function addPayment(
       .select("amount")
       .eq("transaction_id", transactionId);
 
+    const { data: chargeRows } = await supabase
+      .from("transaction_customer_charges")
+      .select("amount")
+      .eq("transaction_id", transactionId);
+
+    const dueTotal = totalTagihan(Number(tx.final_price), chargeRows || []);
     const totalPaidBefore = (existingPayments || []).reduce(
       (sum, p) => sum + Number(p.amount),
       0
     );
-    const remainingBefore = Number(tx.final_price) - totalPaidBefore;
+    const remainingBefore = dueTotal - totalPaidBefore;
     const amount = toRupiahInteger(parsed.data.amount);
 
     if (amount > remainingBefore) {
@@ -1040,7 +1168,7 @@ export async function addPayment(
     }
 
     const totalPaidAfter = totalPaidBefore + amount;
-    const remainingAfter = Number(tx.final_price) - totalPaidAfter;
+    const remainingAfter = dueTotal - totalPaidAfter;
 
     let newStatus = tx.status as string;
     if (remainingAfter <= 0) newStatus = "LUNAS";
@@ -1054,6 +1182,8 @@ export async function addPayment(
         .update({ status: newStatus, updated_at: new Date().toISOString() })
         .eq("id", transactionId);
     }
+
+    await syncLinkedInvoiceTotals([transactionId]);
 
     const statusMsg = newStatus === "LUNAS" ? " — LUNAS" : "";
     return {

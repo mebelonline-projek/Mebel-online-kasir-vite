@@ -9,6 +9,13 @@ import {
   lineItemsTotal,
   type LineItem,
 } from "@/components/transactions/line-items-editor";
+import {
+  createEmptyCustomerCharges,
+  CustomerChargesEditor,
+  customerChargesTotal,
+  toCustomerChargePayload,
+  type CustomerChargeLine,
+} from "@/components/transactions/customer-charges-editor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { CurrencyInput } from "@/components/ui/currency-input";
@@ -49,6 +56,9 @@ export function KasirPage() {
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>(createDefaultLineItems);
+  const [customerCharges, setCustomerCharges] = useState<CustomerChargeLine[]>(
+    createEmptyCustomerCharges
+  );
   const [paymentType, setPaymentType] = useState<"CASH" | "DP">("CASH");
   const [paymentMethod, setPaymentMethod] = useState<"TUNAI" | "TRANSFER">(
     "TUNAI"
@@ -89,9 +99,11 @@ export function KasirPage() {
   );
 
   const itemsTotal = lineItemsTotal(lineItems);
+  const chargesTotal = customerChargesTotal(customerCharges);
   const finalPriceNum = itemsTotal;
+  const totalDue = itemsTotal + chargesTotal;
   const dpAmountNum = Number(dpAmount) || 0;
-  const remaining = Math.max(0, finalPriceNum - dpAmountNum);
+  const remaining = Math.max(0, totalDue - dpAmountNum);
   const isDp = paymentType === "DP";
   const isBackdated = transactionDate < dateBounds.today;
 
@@ -112,6 +124,10 @@ export function KasirPage() {
       return;
     }
 
+    const chargesPayload = toCustomerChargePayload(customerCharges);
+    const chargesSum = chargesPayload.reduce((s, c) => s + c.amount, 0);
+    const due = total + chargesSum;
+
     let dp = 0;
     if (paymentType === "DP") {
       const dpParsed = parseRupiahInteger(dpAmount);
@@ -120,8 +136,8 @@ export function KasirPage() {
         return;
       }
       dp = dpParsed.value;
-      if (dp >= total) {
-        toast.error("DP harus kurang dari harga final");
+      if (dp >= due) {
+        toast.error("DP harus kurang dari total tagihan");
         return;
       }
     }
@@ -143,6 +159,7 @@ export function KasirPage() {
         note: i.note || "",
         warehouse_id: i.warehouse_id || "",
       })),
+      customer_charges: chargesPayload,
     };
 
     setLoading(true);
@@ -221,16 +238,32 @@ export function KasirPage() {
             onKeyDown={onKeyDown}
           >
             <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[1fr_280px] lg:gap-8">
-              {finalPriceNum > 0 && (
+              {totalDue > 0 && (
                 <Card className="order-first shadow-sm lg:order-last lg:sticky lg:top-6 lg:self-start">
                   <CardContent className="space-y-3 p-6">
                     <p className="text-xs font-bold tracking-wider text-muted-foreground uppercase">
                       Ringkasan
                     </p>
                     <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Total</span>
-                      <span className="font-bold">
+                      <span className="text-muted-foreground">Subtotal barang</span>
+                      <span className="font-semibold">
                         {formatCurrency(finalPriceNum)}
+                      </span>
+                    </div>
+                    {chargesTotal > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">
+                          Biaya pembeli
+                        </span>
+                        <span className="font-semibold">
+                          {formatCurrency(chargesTotal)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Total tagihan</span>
+                      <span className="font-bold">
+                        {formatCurrency(totalDue)}
                       </span>
                     </div>
                     {isDp && dpAmountNum > 0 && (
@@ -252,6 +285,11 @@ export function KasirPage() {
                           : "Pembayaran DP"}{" "}
                         · {paymentMethod === "TUNAI" ? "Tunai" : "Transfer"}
                       </p>
+                      {chargesTotal > 0 && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Biaya pembeli tidak masuk omzet dashboard
+                        </p>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -313,6 +351,11 @@ export function KasirPage() {
                   stocks={stocks}
                 />
 
+                <CustomerChargesEditor
+                  charges={customerCharges}
+                  onChange={setCustomerCharges}
+                />
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium">
                     Tipe Pembayaran <span className="text-destructive">*</span>
@@ -349,8 +392,8 @@ export function KasirPage() {
                       value={dpAmount}
                       onChange={setDpAmount}
                       placeholder={
-                        finalPriceNum > 1
-                          ? `Maks ${formatCurrency(finalPriceNum - 1)}`
+                        totalDue > 1
+                          ? `Maks ${formatCurrency(totalDue - 1)}`
                           : "500.000"
                       }
                       className="h-12 text-lg"

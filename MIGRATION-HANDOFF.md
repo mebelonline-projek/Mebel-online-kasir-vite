@@ -2,9 +2,20 @@
 
 Dokumen ini untuk AI agent / developer di **chat baru**. Jangan mengulang keputusan yang sudah final.
 
-## Lanjut besok (2 Agu 2026) — baca ini dulu
+## Keputusan produksi (6 Agu 2026) — WAJIB
 
-**Update 2 Agu malam (serah klien):** Register publik dikunci (`/register` → `/login`; user baru via OWNER Pengaturan User). Edge `apply-sale-stock` authz diperketat (SALE/restore) + redeploy. Kode migrasi di-commit; Workers redeploy. Klien pakai `workers.dev` (tanpa domain custom). Next/`vercel.app` = cadangan.
+**Klien sudah fully on SPA.** App produksi = Workers SPA saja.
+
+- **Jangan** update / port / sync fitur baru ke repo Next (`Aplikasi monitoring`).
+- Next/`vercel.app` + tag `v1-next-stable` = arsip / cadangan darurat saja; bukan jalur pengembangan.
+- Semua fitur baru, bugfix, SQL, Edge, deploy → **hanya di repo SPA ini**.
+- UI patokan = SPA live yang sudah dipakai klien (bukan “parity Next dulu”).
+
+## Lanjut besok — baca ini dulu
+
+**Update 6 Agu:** Biaya dibebankan ke pembeli (ongkir) di SPA — tabel `transaction_customer_charges` applied; masuk nota, bukan omzet. SQL: `supabase/migrate_customer_charges.sql`.
+
+**Update 2 Agu malam (serah klien):** Register publik dikunci (`/register` → `/login`; user baru via OWNER Pengaturan User). Edge `apply-sale-stock` authz diperketat (SALE/restore) + redeploy. Kode migrasi di-commit; Workers redeploy. Klien pakai `workers.dev` (tanpa domain custom). Next/`vercel.app` = cadangan arsip.
 
 **Update 2 Agu malam (ops + smoke):** Redeploy Workers dengan `VITE_EDGE_MANAGE_USERS_URL` baked; smoke manage-users + transaksi (data uji baru lalu dibersihkan); PWA mobile + SW/offline dicek di Playwright. **DNS cutover tidak relevan** jika klien hanya pakai `*.workers.dev` / `*.vercel.app`. Rollback tag `v1-next-stable` OK.
 
@@ -12,10 +23,11 @@ Jangan ulang port Gudang/Operasional/Piutang/Invoice/Pengaturan-toko/foto/Nota/H
 
 ### Serah klien — URL & residual
 
-- SPA live: https://mebel-online-kasir-vite.mebelonline.workers.dev/
-- Cadangan Next: https://mebel-online-monitoring.vercel.app/ + tag `v1-next-stable`
+- SPA live (produksi): https://mebel-online-kasir-vite.mebelonline.workers.dev/
+- Next (arsip/cadangan saja): https://mebel-online-monitoring.vercel.app/ + tag `v1-next-stable` — **jangan dikembangkan lagi**
 - User baru: OWNER → `/pengaturan/user` (bukan `/register`)
 - Residual: audit RLS SQL belum menyeluruh; password min 6 di manage-users; uji PWA HP fisik opsional
+- Diagnosis 6 Agu: omzet = laba kotor karena `hpp_items` kosong (0 baris) — bukan bug dashboard; klien perlu isi HPP per transaksi
 
 ### Status Pengaturan + Edge `manage-users` (penting)
 
@@ -31,24 +43,35 @@ Jangan ulang port Gudang/Operasional/Piutang/Invoice/Pengaturan-toko/foto/Nota/H
 
 ### Antrian prioritas SPA (default jika user bilang “lanjut”)
 
-1. Cutover DNS domain toko → SPA Workers (**hanya jika user minta**); Next = fallback tag `v1-next-stable`.
-2. Uji PWA di HP fisik toko (opsional; Playwright mobile/SW sudah OK).
+1. Smoke biaya pembeli (ongkir) di kasir → nota → dashboard omzet tidak ikut charges (data uji baru lalu hapus).
+2. Uji PWA di HP fisik toko (opsional).
+3. Cutover DNS domain toko → SPA Workers (**hanya jika user minta**).
 
-### Fitur klien di Next → roadmap SPA
+### Fitur (arsip migrasi — semua sudah di SPA; Next tidak dilanjutkan)
 
-| Fitur | Status | Masuk SPA kapan |
-|-------|--------|-----------------|
-| Search Gudang/Stok | Done Next + **ported SPA** `/gudang/stok` | — |
-| Varian `parent_id` / `warna` / `ukuran` | SQL applied + **ported SPA** barang/kasir/stok/mutasi | — |
-| Tanggal custom transaksi (create only) | Done Next + **ported SPA** kasir | — |
-| Upload foto barang | Done Next + **ported SPA** | — |
-| Pengaturan toko + logo | **ported SPA** | — |
-| Kelola user (create/update/delete) | Edge **redeploy** + smoke create/edit/hapus OK | — |
-| Dashboard keuangan (trend/HPP/MTD) | Done Next 2 Agu + **ported SPA** | — |
-| Nota/PDF + HPP | Done Next + **ported SPA** | — |
-| Transaksi detail/list parity | Done Next + **ported SPA**; smoke fulfillment+hapus pada trx uji | — |
+| Fitur | Status |
+|-------|--------|
+| Search Gudang/Stok | SPA |
+| Varian `parent_id` / `warna` / `ukuran` | SPA |
+| Tanggal custom transaksi (create only) | SPA |
+| Upload foto barang | SPA |
+| Pengaturan toko + logo | SPA |
+| Kelola user (create/update/delete) | SPA + Edge |
+| Dashboard keuangan (trend/HPP/MTD) | SPA |
+| Nota/PDF + HPP | SPA |
+| Transaksi detail/list parity | SPA |
+| Biaya dibebankan ke pembeli (ongkir) | **SPA only** — `transaction_customer_charges` |
 
-Model: parent shell + child leaf; stok/kasir/Edge tetap per `product_id` leaf. Standalone = `parent_id` null. Jangan pecah skema hanya di satu repo.
+Model: parent shell + child leaf; stok/kasir/Edge tetap per `product_id` leaf. Standalone = `parent_id` null.
+
+#### Biaya dibebankan ke pembeli — kontrak (SPA)
+
+- Baris bebas nama + nominal di kasir (opsional): ongkir, packing, dll.
+- `transactions.final_price` = harga barang saja; total tagihan = barang + Σ charges.
+- Nota/PDF/thermal menampilkan breakdown; piutang/pelunasan/invoice memakai total tagihan.
+- Dashboard omzet = bagian pembayaran yang menutup harga barang (alokasi barang dulu); charges tidak masuk omzet/HPP/laba.
+- Bukan HPP, bukan operasional, bukan item gudang. Markup ongkir tidak didukung v1.
+- Edit charges di halaman edit DP (sebelum LUNAS / multi-payment).
 
 #### Tanggal custom transaksi — kontrak (sudah di SPA)
 
@@ -75,13 +98,13 @@ Untuk transaksi yang lupa diinput. Aturan:
 - OWNER: `/dashboard` — Omzet “Uang masuk”; Laba Kotor HPP proporsional; trend tidak % ribuan; MTD s/d hari ini.
 - List `/transaksi` — filter Pesanan + badge fulfillment; Export CSV (OWNER).
 
-### Preferensi user (sesi 29 Jul – 2 Agu)
+### Preferensi user
 
+- **6 Agu 2026:** fully on SPA — jangan update Next untuk fitur baru.
 - SPA **cepat + multi-device aman** (local-first + Realtime + NetworkOnly SW).
-- UI parity dengan Next **wajib** sebelum cutover.
-- Fitur klien baru: **Next dulu** (selesai + SQL OK), SPA ikut saat port modul.
 - Delay deploy/uji hosting ekstra sampai diminta.
 - PowerShell: `;` bukan `&&`.
+- (Arsip) UI parity dengan Next pernah wajib sebelum cutover — sudah selesai; Next tidak dilanjutkan.
 
 ### Baru selesai (2 Agu malam) — parity transaksi detail + list; jangan ulang kecuali bug
 

@@ -84,6 +84,10 @@ export function NotaPage() {
         transaction_number={tx.transaction_number}
         customer_name={tx.customer_name || "—"}
         lineItems={lineItems}
+        customerCharges={tx.transaction_customer_charges.map((c) => ({
+          name: c.name,
+          amount: c.amount,
+        }))}
         final_price={tx.final_price}
         payment_type={tx.payment_type}
         dp_amount={tx.dp_amount}

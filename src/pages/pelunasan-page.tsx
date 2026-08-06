@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { PageListSkeleton } from "@/components/shared/page-skeleton";
 import { emitDataChanged } from "@/lib/data-events";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { totalTagihan } from "@/lib/customer-charges";
 import { addPayment, getTransactionById } from "@/lib/transactions";
 
 export function PelunasanPage() {
@@ -59,7 +60,9 @@ export function PelunasanPage() {
       }
       setTxNumber(tx.transaction_number);
       setCustomerName(tx.customer_name || "Tanpa nama");
-      setFinalPrice(tx.final_price);
+      setFinalPrice(
+        totalTagihan(tx.final_price, tx.transaction_customer_charges)
+      );
       setPayments(tx.transaction_payments);
       setLoading(false);
     })();
