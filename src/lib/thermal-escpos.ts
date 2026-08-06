@@ -222,6 +222,21 @@ function wrapText(text: string, cols: number): string[] {
   return lines.length > 0 ? lines : [""];
 }
 
+export function downloadEscPosFile(
+  payload: Uint8Array,
+  filename: string,
+): void {
+  const blob = new Blob([payload], { type: "application/octet-stream" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export function isWebSerialSupported(): boolean {
   return typeof navigator !== "undefined" && "serial" in navigator;
 }

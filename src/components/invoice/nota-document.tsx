@@ -15,6 +15,7 @@ import {
 } from "@/lib/print-nota-pdf";
 import {
   buildThermalNotaEscPos,
+  downloadEscPosFile,
   isWebSerialSupported,
   printViaWebSerial,
 } from "@/lib/thermal-escpos";
@@ -99,7 +100,25 @@ export function NotaDocument({
     }
   };
 
-  /** Jendela HTML 58mm — hindari PDF sempit yang jadi garis putih di preview A4. */
+  const buildEscPosPayload = () =>
+    buildThermalNotaEscPos({
+      store_name,
+      store_address: store_address || undefined,
+      store_phone: store_phone || undefined,
+      transaction_number,
+      customer_name,
+      payment_type,
+      created_at,
+      lineItems,
+      customerCharges,
+      final_price,
+      total_due: totalDue,
+      dp_amount,
+      status,
+      payments,
+    });
+
+  /** Dialog sistem (POS-58). Jika kertas kosong, pakai Cetak Thermal ESC/POS. */
   const handlePrintNota = () => {
     try {
       printNotaHtml({
@@ -126,39 +145,20 @@ export function NotaDocument({
         money: formatCurrency,
       });
       toast.message(
-        "Di dialog cetak: pilih POS-58 → Setelan lain → kertas 58mm, margin minimum, skala 100%. Lalu ketuk Cetak.",
-        { duration: 9000 },
+        serialOk
+          ? "Jika kertas kosong: batalkan, lalu pakai Cetak Thermal (ESC/POS)."
+          : "POS-58: kertas 58mm, skala 100%. Jika kertas kosong, driver tidak cocok — pakai USB + Cetak Thermal di Chrome PC.",
+        { duration: 10000 },
       );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (msg === "POPUP_BLOCKED" || msg === "PRINT_FRAME_FAILED") {
-        toast.error("Gagal membuka dialog cetak. Coba hard refresh lalu ulang.");
-      } else {
-        toast.error("Gagal membuka dialog cetak");
-      }
+    } catch {
+      toast.error("Gagal membuka dialog cetak. Coba hard refresh lalu ulang.");
     }
   };
 
   const handleThermalPrint = async () => {
     setPrintingThermal(true);
     try {
-      const payload = buildThermalNotaEscPos({
-        store_name,
-        store_address: store_address || undefined,
-        store_phone: store_phone || undefined,
-        transaction_number,
-        customer_name,
-        payment_type,
-        created_at,
-        lineItems,
-        customerCharges,
-        final_price,
-        total_due: totalDue,
-        dp_amount,
-        status,
-        payments,
-      });
-      await printViaWebSerial(payload);
+      await printViaWebSerial(buildEscPosPayload());
       toast.success("Nota dikirim ke printer thermal");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
@@ -166,11 +166,26 @@ export function NotaDocument({
         toast.message("Pemilihan printer dibatalkan");
       } else {
         toast.error(
-          "Gagal cetak thermal. Pastikan printer USB terhubung (Chrome PC), atau pakai Cetak Nota.",
+          "Gagal cetak thermal. Pilih port COM/USB printer di dialog Chrome.",
         );
       }
     } finally {
       setPrintingThermal(false);
+    }
+  };
+
+  const handleDownloadEscPos = () => {
+    try {
+      downloadEscPosFile(
+        buildEscPosPayload(),
+        `NOTA-${transaction_number}.bin`,
+      );
+      toast.message(
+        "File .bin diunduh. Di Android buka dengan RawBT / app printer ESC/POS.",
+        { duration: 9000 },
+      );
+    } catch {
+      toast.error("Gagal membuat file thermal");
     }
   };
 
@@ -189,28 +204,38 @@ export function NotaDocument({
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali
         </Button>
-        <Button
-          size="sm"
-          onClick={() => handlePrintNota()}
-          className="gap-1"
-          title="Cetak ke POS-58 via jendela HTML 58mm"
-        >
-          <Printer className="h-3.5 w-3.5" />
-          Cetak Nota
-        </Button>
         {serialOk && (
           <Button
             size="sm"
-            variant="secondary"
             onClick={() => void handleThermalPrint()}
             disabled={printingThermal}
             className="gap-1"
-            title="Kirim ESC/POS langsung ke printer USB (Chrome PC)"
+            title="Kirim ESC/POS langsung — cocok jika Cetak Nota menghasilkan kertas kosong"
           >
             <Usb className="h-3.5 w-3.5" />
             {printingThermal ? "Mencetak..." : "Cetak Thermal"}
           </Button>
         )}
+        <Button
+          size="sm"
+          variant={serialOk ? "outline" : "default"}
+          onClick={() => handlePrintNota()}
+          className="gap-1"
+          title="Dialog cetak Windows/Chrome ke POS-58"
+        >
+          <Printer className="h-3.5 w-3.5" />
+          Cetak Nota
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => handleDownloadEscPos()}
+          className="gap-1"
+          title="Unduh perintah ESC/POS untuk RawBT / app printer"
+        >
+          <Download className="h-3.5 w-3.5" />
+          File Thermal
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -222,18 +247,27 @@ export function NotaDocument({
           {savingPdf ? "Menyimpan..." : "Simpan PDF"}
         </Button>
       </div>
-      {mobileClient ? (
-        <p className="mb-4 text-center text-xs text-muted-foreground">
-          Ketuk Cetak Nota → dialog cetak muncul. Pilih printer Bluetooth/POS-58,
-          kertas 58mm, skala 100%, lalu Cetak.
-        </p>
-      ) : (
-        <p className="mb-4 text-center text-xs text-muted-foreground">
-          Cetak Nota → pilih <span className="font-medium">POS-58</span> →
-          Setelan lain: kertas 58mm, margin minimum, skala 100% → tombol Cetak.
-          Pastikan printer Bluetooth menyala dan terhubung di Windows.
-        </p>
-      )}
+      <p className="mb-4 text-center text-xs text-muted-foreground">
+        {serialOk ? (
+          <>
+            Kertas keluar tapi kosong? Pakai{" "}
+            <span className="font-medium">Cetak Thermal</span> (USB/COM). Dialog
+            Windows sering tidak menggambar teks di POS-58.
+          </>
+        ) : mobileClient ? (
+          <>
+            Di HP: unduh <span className="font-medium">File Thermal</span> lalu
+            buka dengan RawBT. Atau Cetak Nota → Bluetooth (hasil tergantung
+            driver).
+          </>
+        ) : (
+          <>
+            Sambungkan printer USB di Chrome PC agar tombol{" "}
+            <span className="font-medium">Cetak Thermal</span> muncul — paling
+            andal untuk POS-58.
+          </>
+        )}
+      </p>
 
       <div
         className="mx-auto max-w-[500px] rounded-xl border border-border bg-white p-6 text-black shadow-sm sm:p-8"

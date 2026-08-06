@@ -1,7 +1,6 @@
 /**
- * Cetak nota ke printer POS-58 via HTML sempit (iframe, tanpa popup).
- * PDF 58mm di Chrome sering jadi garis putih di preview A4.
- * window.print() harus sinkron dari gesture klik — setTimeout sering diblokir.
+ * Cetak nota ke printer POS-58 via HTML sempit (iframe off-screen berukuran nyata).
+ * iframe 0×0 / visibility:hidden sering menghasilkan kertas kosong di thermal.
  */
 
 export interface NotaPrintLineItem {
@@ -141,27 +140,31 @@ const PRINT_STYLES = `
   html, body {
     margin: 0;
     padding: 0;
-    width: 58mm;
-    max-width: 58mm;
-    background: #fff;
-    color: #000;
-    font-family: "Courier New", Courier, monospace;
-    font-size: 12px;
-    line-height: 1.35;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    width: 58mm !important;
+    max-width: 58mm !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-family: "Courier New", Courier, monospace !important;
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   #receipt {
-    width: 54mm;
-    max-width: 54mm;
+    width: 54mm !important;
+    max-width: 54mm !important;
     margin: 0 auto;
     padding: 2mm 1.5mm;
+    color: #000 !important;
+    background: #fff !important;
   }
+  #receipt * { color: #000 !important; background: transparent !important; }
   h1 {
     font-size: 14px;
     margin: 4px 0 2px;
     text-align: center;
     letter-spacing: 0.05em;
+    font-weight: 700;
   }
   .center { text-align: center; }
   .bold { font-weight: 700; }
@@ -202,8 +205,8 @@ function buildFullDocument(data: NotaPrintData): string {
 }
 
 /**
- * Cetak via iframe tersembunyi — tidak butuh popup, print() dipanggil
- * langsung dari gesture klik user (Chrome tidak memblokir).
+ * Cetak via iframe off-screen berukuran nyata (bukan 0×0).
+ * print() sinkron dari gesture klik.
  */
 export function printNotaHtml(data: NotaPrintData): void {
   const html = buildFullDocument(data);
@@ -212,9 +215,19 @@ export function printNotaHtml(data: NotaPrintData): void {
 
   const iframe = document.createElement("iframe");
   iframe.id = "nota-print-frame";
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.cssText =
-    "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;";
+  iframe.title = "Cetak nota";
+  // Jangan width/height 0 atau visibility:hidden — thermal sering cetak kertas kosong.
+  iframe.style.cssText = [
+    "position:fixed",
+    "left:0",
+    "top:0",
+    "width:58mm",
+    "height:90vh",
+    "border:0",
+    "opacity:0",
+    "pointer-events:none",
+    "z-index:-1",
+  ].join(";");
   document.body.appendChild(iframe);
 
   const frameWindow = iframe.contentWindow;
@@ -231,13 +244,9 @@ export function printNotaHtml(data: NotaPrintData): void {
   frameWindow.focus();
   frameWindow.print();
 
-  // Hapus setelah dialog cetak ditutup / timeout
   const cleanup = () => {
-    window.setTimeout(() => iframe.remove(), 1000);
+    window.setTimeout(() => iframe.remove(), 2000);
   };
-  if ("onafterprint" in frameWindow) {
-    frameWindow.addEventListener("afterprint", cleanup, { once: true });
-  } else {
-    cleanup();
-  }
+  frameWindow.addEventListener("afterprint", cleanup, { once: true });
+  window.setTimeout(cleanup, 60_000);
 }
