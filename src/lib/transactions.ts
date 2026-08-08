@@ -230,17 +230,25 @@ async function syncTransactionItemPrices(
   );
 
   for (const patch of patches) {
-    const { error: updError } = await supabase
+    const { data: updated, error: updError } = await supabase
       .from("transaction_items")
       .update({
         unit_price: patch.unit_price,
         line_total: patch.line_total,
       })
-      .eq("id", patch.id);
+      .eq("id", patch.id)
+      .select("id");
     if (updError) {
       return {
         ok: false,
         message: `Gagal sync harga item: ${updError.message}`,
+      };
+    }
+    if (!updated || updated.length === 0) {
+      return {
+        ok: false,
+        message:
+          "Gagal sync harga item: tidak diizinkan mengubah baris pesanan (RLS). Coba sebagai Owner atau cek policy transaction_items.",
       };
     }
   }
