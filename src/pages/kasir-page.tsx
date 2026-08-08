@@ -34,6 +34,7 @@ import {
   wibNoonISO,
 } from "@/lib/date-utils";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   CachedCustomer,
   CachedProduct,
@@ -55,6 +56,7 @@ export function KasirPage() {
 
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState("");
+  const [description, setDescription] = useState("");
   const [lineItems, setLineItems] = useState<LineItem[]>(createDefaultLineItems);
   const [customerCharges, setCustomerCharges] = useState<CustomerChargeLine[]>(
     createEmptyCustomerCharges
@@ -145,7 +147,7 @@ export function KasirPage() {
     const payload = {
       customer_id: customerId || "",
       customer_name: customerName || null,
-      description: null as string | null,
+      description: description.trim() || null,
       final_price: total,
       payment_type: paymentType,
       payment_method: paymentMethod,
@@ -350,6 +352,23 @@ export function KasirPage() {
                   warehouses={warehouses}
                   stocks={stocks}
                 />
+
+                <div className="space-y-1.5">
+                  <label htmlFor="kasir_description" className="text-sm font-medium">
+                    Deskripsi{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (opsional)
+                    </span>
+                  </label>
+                  <Textarea
+                    id="kasir_description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Catatan untuk nota / detail transaksi"
+                    className="min-h-[80px] resize-y"
+                    maxLength={1000}
+                  />
+                </div>
 
                 <CustomerChargesEditor
                   charges={customerCharges}

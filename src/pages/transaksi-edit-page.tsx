@@ -21,6 +21,11 @@ import {
   type CustomerChargeLine,
 } from "@/components/transactions/customer-charges-editor";
 import { emitDataChanged } from "@/lib/data-events";
+import {
+  getTransactionDateBounds,
+  getWibDateString,
+  wibNoonISO,
+} from "@/lib/date-utils";
 import { formatCurrency } from "@/lib/formatters";
 import { parseRupiahInteger } from "@/lib/money";
 import type { CachedCustomer } from "@/lib/offline-db";
@@ -33,6 +38,7 @@ import { transactionSchema } from "@/lib/validation";
 export function TransaksiEditPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const dateBounds = useMemo(() => getTransactionDateBounds(), []);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,6 +55,7 @@ export function TransaksiEditPage() {
     "TUNAI"
   );
   const [dpAmount, setDpAmount] = useState("");
+  const [transactionDate, setTransactionDate] = useState(dateBounds.today);
   const [customerCharges, setCustomerCharges] = useState<CustomerChargeLine[]>(
     createEmptyCustomerCharges
   );
@@ -76,8 +83,19 @@ export function TransaksiEditPage() {
         return;
       }
 
-      if (result.data.status !== "DP") {
-        toast.error("Hanya transaksi DP yang bisa diedit");
+      if (
+        result.data.status !== "DP" &&
+        result.data.status !== "LUNAS"
+      ) {
+        toast.error("Transaksi ini tidak bisa diedit");
+        navigate(`/transaksi/${id}`, { replace: true });
+        return;
+      }
+
+      if ((result.data.transaction_payments || []).length > 1) {
+        toast.error(
+          "Transaksi memiliki lebih dari satu pembayaran, tidak bisa diedit"
+        );
         navigate(`/transaksi/${id}`, { replace: true });
         return;
       }
@@ -90,6 +108,7 @@ export function TransaksiEditPage() {
       setDescription(result.data.description || "");
       setFinalPrice(String(result.data.final_price));
       setPaymentType(result.data.payment_type);
+      setTransactionDate(getWibDateString(new Date(result.data.created_at)));
       setDpAmount(
         result.data.payment_type === "DP"
           ? String(result.data.dp_amount)
@@ -130,6 +149,7 @@ export function TransaksiEditPage() {
   const dpAmountNum = Number(dpAmount) || 0;
   const remaining = Math.max(0, totalDue - dpAmountNum);
   const isDp = paymentType === "DP";
+  const isBackdated = transactionDate !== dateBounds.today;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -162,6 +182,7 @@ export function TransaksiEditPage() {
       payment_type: paymentType,
       payment_method: paymentMethod,
       dp_amount: dp,
+      transaction_date: transactionDate,
       customer_charges: toCustomerChargePayload(customerCharges),
     };
 
@@ -203,7 +224,7 @@ export function TransaksiEditPage() {
           Edit Transaksi
         </h1>
         <p className="mt-1 font-mono text-sm text-muted-foreground">
-          {txNumber} · hanya header & DP (item/stok tidak diubah)
+          {txNumber} · header & pembayaran awal (item/stok tidak diubah)
         </p>
       </div>
 
@@ -240,6 +261,41 @@ export function TransaksiEditPage() {
                 {fieldErrors.description && (
                   <p className="text-xs text-destructive">
                     {fieldErrors.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label htmlFor="edit_transaction_date" className="text-sm font-medium">
+                  Tanggal transaksi
+                </label>
+                <Input
+                  id="edit_transaction_date"
+                  type="date"
+                  value={transactionDate}
+                  min={dateBounds.min}
+                  max={dateBounds.today}
+                  onChange={(e) => setTransactionDate(e.target.value)}
+                  className="h-12"
+                />
+                {fieldErrors.transaction_date && (
+                  <p className="text-xs text-destructive">
+                    {fieldErrors.transaction_date}
+                  </p>
+                )}
+                {isBackdated && (
+                  <p className="text-xs text-muted-foreground">
+                    Mundur ke{" "}
+                    {new Date(wibNoonISO(transactionDate)).toLocaleDateString(
+                      "id-ID",
+                      {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        timeZone: "Asia/Jakarta",
+                      }
+                    )}
+                    . Posisi di list mengikuti tanggal ini; nomor TRX tidak berubah.
                   </p>
                 )}
               </div>

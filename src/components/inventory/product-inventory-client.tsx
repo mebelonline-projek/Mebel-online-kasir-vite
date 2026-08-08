@@ -59,6 +59,7 @@ type FormState = {
   name: string;
   category_id: string;
   base_price: string;
+  cost_price: string;
   min_stock: string;
   description: string;
   warehouse_id: string;
@@ -71,6 +72,7 @@ type VariantDraft = {
   warna: string;
   ukuran: string;
   base_price: string;
+  cost_price: string;
   initial_qty: string;
 };
 
@@ -80,6 +82,7 @@ type VariantEditState = {
   warna: string;
   ukuran: string;
   base_price: string;
+  cost_price: string;
   min_stock: string;
 };
 
@@ -137,12 +140,13 @@ function ProductThumb({
   );
 }
 
-function newVariantDraft(basePrice = ""): VariantDraft {
+function newVariantDraft(basePrice = "", costPrice = ""): VariantDraft {
   return {
     key: crypto.randomUUID(),
     warna: "",
     ukuran: "",
     base_price: basePrice,
+    cost_price: costPrice,
     initial_qty: "0",
   };
 }
@@ -186,6 +190,7 @@ export function ProductInventoryClient({
     warna: "",
     ukuran: "",
     base_price: "",
+    cost_price: "",
     min_stock: "0",
     warehouse_id: defaultWarehouseId,
     initial_qty: "0",
@@ -231,6 +236,7 @@ export function ProductInventoryClient({
     name: "",
     category_id: initialCategories[0]?.id || "",
     base_price: "",
+    cost_price: "",
     min_stock: "0",
     description: "",
     warehouse_id: defaultWarehouseId,
@@ -371,6 +377,7 @@ export function ProductInventoryClient({
       name: "",
       category_id: initialCategories[0]?.id || "",
       base_price: "",
+      cost_price: "",
       min_stock: "0",
       description: "",
       warehouse_id: defaultWarehouseId,
@@ -408,6 +415,7 @@ export function ProductInventoryClient({
       name: target.name,
       category_id: target.category_id || initialCategories[0]?.id || "",
       base_price: String(target.base_price),
+      cost_price: target.cost_price > 0 ? String(target.cost_price) : "",
       min_stock: String(target.min_stock),
       description: target.description || "",
       warehouse_id: defaultWarehouseId,
@@ -431,6 +439,7 @@ export function ProductInventoryClient({
       warna: v.warna || "",
       ukuran: v.ukuran || "",
       base_price: String(v.base_price),
+      cost_price: v.cost_price > 0 ? String(v.cost_price) : "",
       min_stock: String(v.min_stock),
     });
     resetStockAdjust(v.id);
@@ -561,6 +570,7 @@ export function ProductInventoryClient({
       name: form.name,
       category_id: form.category_id,
       base_price: Number(form.base_price) || 0,
+      cost_price: Number(form.cost_price) || 0,
       min_stock: Math.max(0, Number(form.min_stock) || 0),
       description: form.description.trim() || "",
     };
@@ -609,6 +619,7 @@ export function ProductInventoryClient({
             warna: v.warna.trim(),
             ukuran: v.ukuran.trim(),
             base_price: Number(v.base_price) || Number(form.base_price) || 0,
+            cost_price: Number(v.cost_price) || Number(form.cost_price) || 0,
             min_stock: Math.max(0, Number(form.min_stock) || 0),
             initial_qty: Math.max(0, Number(v.initial_qty) || 0),
           }))
@@ -660,6 +671,7 @@ export function ProductInventoryClient({
       warna: variantEdit.warna,
       ukuran: variantEdit.ukuran,
       base_price: Number(variantEdit.base_price) || 0,
+      cost_price: Number(variantEdit.cost_price) || 0,
       min_stock: Math.max(0, Number(variantEdit.min_stock) || 0),
     });
     if (!result.success) {
@@ -697,6 +709,7 @@ export function ProductInventoryClient({
       warna: "",
       ukuran: "",
       base_price: String(parent.base_price),
+      cost_price: parent.cost_price > 0 ? String(parent.cost_price) : "",
       min_stock: String(parent.min_stock),
       warehouse_id: defaultWarehouseId,
       initial_qty: "0",
@@ -719,6 +732,7 @@ export function ProductInventoryClient({
       warna: addVariantForm.warna,
       ukuran: addVariantForm.ukuran,
       base_price: Number(addVariantForm.base_price) || addVariantParent.base_price,
+      cost_price: Number(addVariantForm.cost_price) || 0,
       min_stock: Math.max(0, Number(addVariantForm.min_stock) || 0),
       warehouse_id: addVariantForm.warehouse_id || null,
       initial_qty: initialQty,
@@ -1337,14 +1351,28 @@ export function ProductInventoryClient({
                 ))}
               </select>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">
-                {form.has_variants ? "Harga referensi" : "Harga jual"}
-              </label>
-              <CurrencyInput
-                value={form.base_price}
-                onChange={(v) => setForm((f) => ({ ...f, base_price: v }))}
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">
+                  {form.has_variants ? "Harga referensi" : "Harga jual"}
+                </label>
+                <CurrencyInput
+                  value={form.base_price}
+                  onChange={(v) => setForm((f) => ({ ...f, base_price: v }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">
+                  {form.has_variants ? "Modal referensi" : "Harga modal"}
+                </label>
+                <CurrencyInput
+                  value={form.cost_price}
+                  onChange={(v) => setForm((f) => ({ ...f, cost_price: v }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Opsional — auto HPP saat jual
+                </p>
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Stok minimum</label>
@@ -1374,7 +1402,9 @@ export function ProductInventoryClient({
                       setForm((f) => {
                         const next = !f.has_variants;
                         if (next && variantDrafts.length === 0) {
-                          setVariantDrafts([newVariantDraft(f.base_price)]);
+                          setVariantDrafts([
+                            newVariantDraft(f.base_price, f.cost_price),
+                          ]);
                         }
                         return { ...f, has_variants: next };
                       })
@@ -1457,24 +1487,37 @@ export function ProductInventoryClient({
                             />
                           </div>
                           <div className="space-y-1">
-                            <label className="text-xs font-medium">Stok awal</label>
-                            <Input
-                              type="number"
-                              min={0}
-                              value={v.initial_qty}
-                              onChange={(e) =>
+                            <label className="text-xs font-medium">Harga modal</label>
+                            <CurrencyInput
+                              value={v.cost_price}
+                              onChange={(val) =>
                                 setVariantDrafts((list) =>
                                   list.map((x) =>
-                                    x.key === v.key
-                                      ? { ...x, initial_qty: e.target.value }
-                                      : x
+                                    x.key === v.key ? { ...x, cost_price: val } : x
                                   )
                                 )
                               }
-                              placeholder="0"
-                              className="min-h-[44px] h-11"
                             />
                           </div>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium">Stok awal</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={v.initial_qty}
+                            onChange={(e) =>
+                              setVariantDrafts((list) =>
+                                list.map((x) =>
+                                  x.key === v.key
+                                    ? { ...x, initial_qty: e.target.value }
+                                    : x
+                                )
+                              )
+                            }
+                            placeholder="0"
+                            className="min-h-[44px] h-11"
+                          />
                         </div>
                       </div>
                     ))}
@@ -1483,7 +1526,10 @@ export function ProductInventoryClient({
                       variant="outline"
                       className="w-full min-h-[44px] gap-1"
                       onClick={() =>
-                        setVariantDrafts((list) => [...list, newVariantDraft(form.base_price)])
+                        setVariantDrafts((list) => [
+                          ...list,
+                          newVariantDraft(form.base_price, form.cost_price),
+                        ])
                       }
                     >
                       <Plus className="w-4 h-4" />
@@ -1612,14 +1658,25 @@ export function ProductInventoryClient({
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Harga jual</label>
-                <CurrencyInput
-                  value={variantEdit.base_price}
-                  onChange={(val) =>
-                    setVariantEdit((v) => (v ? { ...v, base_price: val } : v))
-                  }
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Harga jual</label>
+                  <CurrencyInput
+                    value={variantEdit.base_price}
+                    onChange={(val) =>
+                      setVariantEdit((v) => (v ? { ...v, base_price: val } : v))
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">Harga modal</label>
+                  <CurrencyInput
+                    value={variantEdit.cost_price}
+                    onChange={(val) =>
+                      setVariantEdit((v) => (v ? { ...v, cost_price: val } : v))
+                    }
+                  />
+                </div>
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">Stok minimum</label>
@@ -1690,12 +1747,25 @@ export function ProductInventoryClient({
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">Harga jual</label>
-              <CurrencyInput
-                value={addVariantForm.base_price}
-                onChange={(val) => setAddVariantForm((f) => ({ ...f, base_price: val }))}
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Harga jual</label>
+                <CurrencyInput
+                  value={addVariantForm.base_price}
+                  onChange={(val) =>
+                    setAddVariantForm((f) => ({ ...f, base_price: val }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Harga modal</label>
+                <CurrencyInput
+                  value={addVariantForm.cost_price}
+                  onChange={(val) =>
+                    setAddVariantForm((f) => ({ ...f, cost_price: val }))
+                  }
+                />
+              </div>
             </div>
             <div className="space-y-1">
               <label className="text-sm font-medium">Gudang stok awal</label>

@@ -34,7 +34,7 @@ export async function refreshCatalogCache(): Promise<void> {
         supabase
           .from("products")
           .select(
-            "id, name, category, base_price, unit, parent_id, warna, ukuran, min_stock"
+            "id, name, category, base_price, cost_price, unit, parent_id, warna, ukuran, min_stock"
           )
           .order("name")
           .order("id")
@@ -74,6 +74,7 @@ export async function refreshCatalogCache(): Promise<void> {
       name: p.name as string,
       category: (p.category as string) || "-",
       base_price: Number(p.base_price),
+      cost_price: Number(p.cost_price ?? 0),
       unit: (p.unit as string) || "pcs",
       parent_id: (p.parent_id as string | null) ?? null,
       warna: (p.warna as string | null) ?? null,

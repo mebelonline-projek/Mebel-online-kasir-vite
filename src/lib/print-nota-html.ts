@@ -30,6 +30,7 @@ export interface NotaPrintData {
   customer_name: string;
   payment_type: string;
   created_at_label: string;
+  description?: string | null;
   lineItems: NotaPrintLineItem[];
   customerCharges: NotaPrintCharge[];
   final_price: number;
@@ -106,6 +107,9 @@ function buildReceiptHtml(data: NotaPrintData): string {
   const phone = data.store_phone
     ? `<div class="muted center">Telp: ${esc(data.store_phone)}</div>`
     : "";
+  const catatan = data.description
+    ? `<hr class="dash" /><div class="section">Catatan</div><div>${esc(data.description)}</div>`
+    : "";
 
   return `<div id="receipt">
     <div class="bold center">${esc(data.store_name)}</div>
@@ -118,6 +122,7 @@ function buildReceiptHtml(data: NotaPrintData): string {
     <div>Tanggal: ${esc(data.created_at_label)}</div>
     <div>Pelanggan: <span class="bold">${esc(data.customer_name)}</span></div>
     <div>Tipe: ${data.payment_type === "CASH" ? "Cash (Lunas)" : "DP / Uang Muka"}</div>
+    ${catatan}
     <hr class="dash" />
     <div class="section">Rincian produk</div>
     ${items}

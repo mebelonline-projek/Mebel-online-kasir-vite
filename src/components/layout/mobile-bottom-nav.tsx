@@ -2,7 +2,6 @@ import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Receipt,
-  Users,
   Plus,
   Boxes,
   Package,
@@ -150,13 +149,16 @@ export function MobileBottomNav({ role }: { role: string }) {
         </Link>
 
         <Link
-          to="/customer"
+          to="/produk"
           className={cn(
             "flex h-full min-h-[44px] flex-col items-center justify-center rounded-xl transition-colors",
-            pathname.startsWith("/customer") && "text-primary"
+            (pathname.startsWith("/produk") ||
+              pathname.startsWith("/gudang/barang")) &&
+              "text-primary"
           )}
           style={
-            pathname.startsWith("/customer")
+            pathname.startsWith("/produk") ||
+            pathname.startsWith("/gudang/barang")
               ? {
                   background:
                     "color-mix(in srgb, var(--primary) 12%, transparent)",
@@ -164,10 +166,11 @@ export function MobileBottomNav({ role }: { role: string }) {
               : undefined
           }
         >
-          <Users
+          <Package
             className={cn(
               "h-5 w-5",
-              pathname.startsWith("/customer")
+              pathname.startsWith("/produk") ||
+                pathname.startsWith("/gudang/barang")
                 ? "text-primary"
                 : "text-muted-foreground"
             )}
@@ -175,12 +178,13 @@ export function MobileBottomNav({ role }: { role: string }) {
           <span
             className={cn(
               "mt-0.5 text-[10px] font-medium",
-              pathname.startsWith("/customer")
+              pathname.startsWith("/produk") ||
+                pathname.startsWith("/gudang/barang")
                 ? "text-primary"
                 : "text-muted-foreground"
             )}
           >
-            Pelanggan
+            Produk
           </span>
         </Link>
 

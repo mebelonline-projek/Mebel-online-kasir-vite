@@ -114,7 +114,10 @@ export function TransaksiDetailPage() {
     return { paid, remaining: Math.max(0, due - paid), due };
   }, [tx]);
 
-  const canEdit = tx?.status === "DP";
+  const canEdit =
+    tx != null &&
+    (tx.status === "DP" || tx.status === "LUNAS") &&
+    (tx.transaction_payments?.length ?? 0) <= 1;
   const canPelunasan =
     tx != null &&
     (tx.status === "DP" || tx.status === "MENUNGGU_PELUNASAN");

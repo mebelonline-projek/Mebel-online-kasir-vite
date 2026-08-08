@@ -152,6 +152,14 @@ export function NotaPdfDocument({ data }: { data: InvoiceData }) {
           </Text>
         </View>
 
+        {data.description ? (
+          <>
+            <View style={styles.dash} />
+            <Text style={styles.sectionLabel}>Catatan</Text>
+            <Text style={styles.itemNote}>{data.description}</Text>
+          </>
+        ) : null}
+
         <View style={styles.dash} />
         <Text style={styles.sectionLabel}>Rincian Produk</Text>
 

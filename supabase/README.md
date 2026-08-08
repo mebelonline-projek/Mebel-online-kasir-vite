@@ -28,6 +28,12 @@ Jalankan sekali di SQL Editor (project bersama):
 
 Ongkir & biaya serupa masuk nota + total tagihan, **tidak** masuk omzet dashboard.
 
+### Kategori biaya operasional bebas
+
+- File: `supabase/migrate_operational_cost_category.sql`
+- **Status 6 Agu 2026:** sudah dijalankan (DROP `operational_costs_category_check`).
+- Dropdown: Listrik, Gaji, Bahan baku, Sewa, Utang dengan sales, Lainnya, + Kustom.
+
 
 ```sql
 alter publication supabase_realtime add table public.transactions;

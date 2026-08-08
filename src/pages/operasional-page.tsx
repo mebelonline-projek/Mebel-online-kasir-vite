@@ -89,6 +89,27 @@ function generateMonthOptions(): { value: string; label: string }[] {
 
 const MONTH_OPTIONS = generateMonthOptions();
 
+/** Nilai dropdown untuk input kategori bebas */
+const CATEGORY_CUSTOM = "__CUSTOM__";
+
+const OPERATIONAL_CATEGORY_PRESETS: { value: string; label: string }[] = [
+  { value: "LISTRIK", label: "Listrik" },
+  { value: "GAJI", label: "Gaji" },
+  { value: "BAHAN_BAKU", label: "Bahan baku" },
+  { value: "SEWA", label: "Sewa" },
+  { value: "UTANG_SALES", label: "Utang dengan sales" },
+  { value: "LAINNYA", label: "Lainnya" },
+];
+
+const PRESET_CATEGORY_VALUES = new Set(
+  OPERATIONAL_CATEGORY_PRESETS.map((p) => p.value)
+);
+
+function formatCategoryLabel(category: string): string {
+  const preset = OPERATIONAL_CATEGORY_PRESETS.find((p) => p.value === category);
+  return preset?.label ?? category;
+}
+
 function getDefaultBulan(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -97,10 +118,26 @@ function getDefaultBulan(): string {
 type CostForm = {
   name: string;
   amount: string;
-  category: string;
+  /** Nilai select: kode preset atau CATEGORY_CUSTOM */
+  categorySelect: string;
+  /** Diisi jika categorySelect === CATEGORY_CUSTOM */
+  customCategory: string;
 };
 
-const emptyForm: CostForm = { name: "", amount: "", category: "" };
+const emptyForm: CostForm = {
+  name: "",
+  amount: "",
+  categorySelect: "LAINNYA",
+  customCategory: "",
+};
+
+function resolveCategory(form: CostForm): string {
+  if (form.categorySelect === CATEGORY_CUSTOM) {
+    const custom = form.customCategory.trim();
+    return custom.length > 0 ? custom : "LAINNYA";
+  }
+  return form.categorySelect || "LAINNYA";
+}
 
 export function OperasionalPage() {
   const { role } = useAuth();
@@ -217,10 +254,13 @@ export function OperasionalPage() {
 
   function openEditModal(cost: OperationalCostRow) {
     setEditingCost(cost);
+    const cat = cost.category || "LAINNYA";
+    const isPreset = PRESET_CATEGORY_VALUES.has(cat);
     setForm({
       name: cost.name,
       amount: cost.amount.toString(),
-      category: cost.category || "",
+      categorySelect: isPreset ? cat : CATEGORY_CUSTOM,
+      customCategory: isPreset ? "" : cat,
     });
     setFormErrors({});
     setDialogOpen(true);
@@ -228,9 +268,20 @@ export function OperasionalPage() {
 
   function validateForm(): boolean {
     try {
+      const category = resolveCategory(form);
+      if (
+        form.categorySelect === CATEGORY_CUSTOM &&
+        form.customCategory.trim().length < 2
+      ) {
+        setFormErrors({
+          category: "Kategori kustom minimal 2 karakter",
+        });
+        return false;
+      }
       operationalCostSchema.parse({
-        ...form,
+        name: form.name,
         amount: Number(form.amount),
+        category,
         ...(editingCost ? {} : { cost_date: costDate }),
       });
       setFormErrors({});
@@ -253,16 +304,17 @@ export function OperasionalPage() {
     if (!validateForm()) return;
     setIsSubmitting(true);
     try {
+      const category = resolveCategory(form);
       const payload = editingCost
         ? {
             name: form.name,
             amount: Number(form.amount),
-            category: form.category || "LAINNYA",
+            category,
           }
         : {
             name: form.name,
             amount: Number(form.amount),
-            category: form.category || "LAINNYA",
+            category,
             cost_date: costDate,
           };
 
@@ -438,7 +490,7 @@ export function OperasionalPage() {
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-center justify-between gap-2">
                     <Badge variant="secondary" className="text-xs">
-                      {cost.category || "LAINNYA"}
+                      {formatCategoryLabel(cost.category || "LAINNYA")}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
                       {formatCostDate(cost.period_start)}
@@ -496,7 +548,7 @@ export function OperasionalPage() {
                     <TableRow key={cost.id}>
                       <TableCell>
                         <Badge variant="secondary" className="text-xs">
-                          {cost.category || "LAINNYA"}
+                          {formatCategoryLabel(cost.category || "LAINNYA")}
                         </Badge>
                       </TableCell>
                       <TableCell className="font-semibold">
@@ -624,33 +676,53 @@ export function OperasionalPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">Kategori</label>
-              <Input
-                value={form.category}
+              <label htmlFor="cost_category" className="text-sm font-medium">
+                Kategori
+              </label>
+              <select
+                id="cost_category"
+                value={form.categorySelect}
                 onChange={(e) =>
-                  setForm({ ...form, category: e.target.value })
+                  setForm({
+                    ...form,
+                    categorySelect: e.target.value,
+                    customCategory:
+                      e.target.value === CATEGORY_CUSTOM
+                        ? form.customCategory
+                        : "",
+                  })
                 }
-                placeholder="Contoh: LISTRIK, SEWA (ketik manual atau pilih di bawah)"
-                className={formErrors.category ? "border-destructive" : ""}
-              />
+                className={`flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ${
+                  formErrors.category ? "border-destructive" : ""
+                }`}
+              >
+                {OPERATIONAL_CATEGORY_PRESETS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+                {distinctCategories
+                  .filter((c) => !PRESET_CATEGORY_VALUES.has(c))
+                  .map((c) => (
+                    <option key={`prev-${c}`} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                <option value={CATEGORY_CUSTOM}>Kustom…</option>
+              </select>
+              {form.categorySelect === CATEGORY_CUSTOM && (
+                <Input
+                  value={form.customCategory}
+                  onChange={(e) =>
+                    setForm({ ...form, customCategory: e.target.value })
+                  }
+                  placeholder="Ketik nama kategori"
+                  className={formErrors.category ? "border-destructive" : ""}
+                  autoFocus
+                />
+              )}
               {formErrors.category && (
                 <p className="text-xs text-destructive">{formErrors.category}</p>
-              )}
-              {distinctCategories.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {distinctCategories.map((cat) => (
-                    <Button
-                      key={cat}
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setForm({ ...form, category: cat })}
-                    >
-                      {cat}
-                    </Button>
-                  ))}
-                </div>
               )}
             </div>
 

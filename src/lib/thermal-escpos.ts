@@ -40,6 +40,7 @@ export interface ThermalNotaInput {
   customer_name: string;
   payment_type: string;
   created_at: string;
+  description?: string | null;
   lineItems: InvoiceLineItem[];
   customerCharges?: Array<{ name: string; amount: number }>;
   final_price: number;
@@ -160,6 +161,13 @@ export function buildThermalNotaLines(data: ThermalNotaInput): ThermalLine[] {
     `Tipe: ${data.payment_type === "CASH" ? "Cash Lunas" : "DP / UM"}`,
     "left",
   );
+  if (data.description?.trim()) {
+    add(dashLine(), "left");
+    add("Catatan:", "left", "strong");
+    for (const part of wrapText(data.description.trim(), THERMAL_COLS)) {
+      add(part, "left");
+    }
+  }
   add(dashLine(), "left");
 
   const totalPaid = data.payments.reduce((s, p) => s + p.amount, 0);

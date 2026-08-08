@@ -316,10 +316,12 @@ export async function createTransaction(
     const isCash = data.payment_type === "CASH";
     const status = isCash ? "LUNAS" : "DP";
     const dpAmount = toRupiahInteger(isCash ? dueTotal : data.dp_amount);
+    const userDescription = data.description?.trim() || null;
     const description =
-      data.items && data.items.length > 0
+      userDescription ||
+      (data.items && data.items.length > 0
         ? data.items.map((i) => i.product_name).join(", ")
-        : data.description || null;
+        : null);
     const firstProductId =
       data.items && data.items.length > 0 && data.items[0].product_id
         ? data.items[0].product_id
@@ -426,6 +428,54 @@ export async function createTransaction(
           success: false,
           message: `Gagal menyimpan item: ${itemsError.message}`,
         };
+      }
+
+      // Auto-seed HPP dari harga modal produk (opsional; gagal tidak batalkan jual)
+      const catalogProductIds = [
+        ...new Set(
+          rows
+            .map((r) => r.product_id)
+            .filter((id): id is string => Boolean(id))
+        ),
+      ];
+      if (catalogProductIds.length > 0) {
+        const { data: costRows } = await supabase
+          .from("products")
+          .select("id, cost_price")
+          .in("id", catalogProductIds);
+
+        const costById = new Map(
+          (costRows || []).map((p) => [
+            p.id as string,
+            Number(p.cost_price ?? 0),
+          ])
+        );
+
+        const hppRows = rows
+          .filter((r) => r.product_id && (costById.get(r.product_id) ?? 0) > 0)
+          .map((r) => {
+            const unitCost = costById.get(r.product_id!) ?? 0;
+            return {
+              transaction_id: transaction.id,
+              name: r.product_name,
+              amount: toRupiahInteger(r.quantity) * toRupiahInteger(unitCost),
+              note: null as string | null,
+              created_by: user.id,
+            };
+          })
+          .filter((h) => h.amount > 0);
+
+        if (hppRows.length > 0) {
+          const { error: hppError } = await supabase
+            .from("hpp_items")
+            .insert(hppRows);
+          if (hppError) {
+            console.warn(
+              "Gagal auto-isi HPP dari harga modal:",
+              hppError.message
+            );
+          }
+        }
       }
 
       // Potong stok via Edge Function jika dikonfigurasi
@@ -550,6 +600,7 @@ export async function listRecentTransactions(
         "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, fulfillment_status, created_at, client_id"
       )
       .order("created_at", { ascending: false })
+      .order("transaction_number", { ascending: false })
       .limit(limit);
 
     if (error) {
@@ -738,10 +789,10 @@ export async function updateTransaction(
       return { success: false, message: "Transaksi tidak ditemukan" };
     }
 
-    if (existing.status === "LUNAS" || existing.status === "BATAL") {
+    if (existing.status === "BATAL") {
       return {
         success: false,
-        message: "Transaksi sudah lunas atau batal, tidak bisa diedit",
+        message: "Transaksi batal tidak bisa diedit",
       };
     }
 
@@ -750,6 +801,13 @@ export async function updateTransaction(
         success: false,
         message:
           "Transaksi sudah ada pelunasan, tidak bisa diedit. Batalkan dulu jika perlu koreksi.",
+      };
+    }
+
+    if (existing.status !== "DP" && existing.status !== "LUNAS") {
+      return {
+        success: false,
+        message: "Status transaksi tidak bisa diedit",
       };
     }
 
@@ -803,6 +861,10 @@ export async function updateTransaction(
     const dueTotal = totalTagihan(finalPrice, chargeRows);
     const dpAmount = toRupiahInteger(isCash ? dueTotal : data.dp_amount);
     const newStatus = isCash ? "LUNAS" : "DP";
+    const businessTimestamp =
+      data.transaction_date && data.transaction_date.length > 0
+        ? wibNoonISO(data.transaction_date)
+        : null;
 
     if (!isCash && data.dp_amount >= dueTotal) {
       return {
@@ -829,6 +891,7 @@ export async function updateTransaction(
         dp_amount: dpAmount,
         status: newStatus,
         updated_at: new Date().toISOString(),
+        ...(businessTimestamp ? { created_at: businessTimestamp } : {}),
       })
       .eq("id", id);
 
@@ -860,14 +923,16 @@ export async function updateTransaction(
 
     const paymentAmount = dpAmount;
     const existingPaymentsList = existingPayments || [];
+    const paymentPatch = {
+      amount: paymentAmount,
+      note: isCash ? "Pembayaran Lunas (edit)" : "Uang Muka (DP) — edit",
+      ...(businessTimestamp ? { payment_date: businessTimestamp } : {}),
+    };
 
     if (existingPaymentsList.length > 0) {
       const { error: payError } = await supabase
         .from("transaction_payments")
-        .update({
-          amount: paymentAmount,
-          note: isCash ? "Pembayaran Lunas (edit)" : "Uang Muka (DP) — edit",
-        })
+        .update(paymentPatch)
         .eq("id", existingPaymentsList[0].id);
 
       if (payError) {
@@ -885,6 +950,7 @@ export async function updateTransaction(
           method: data.payment_method || "TUNAI",
           note: isCash ? "Pembayaran Lunas (edit)" : "Uang Muka (DP) — edit",
           created_by: user.id,
+          ...(businessTimestamp ? { payment_date: businessTimestamp } : {}),
         });
 
       if (payError) {

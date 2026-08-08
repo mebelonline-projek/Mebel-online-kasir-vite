@@ -119,7 +119,7 @@ export const transactionCreateSchema = z
 
 export type TransactionCreateValues = z.infer<typeof transactionCreateSchema>;
 
-/** Edit transaksi (DP-only) — tanpa line items / tanggal custom. */
+/** Edit header transaksi (DP/LUNAS, 1 pembayaran) — tanpa line items. Tanggal bisnis opsional. */
 export const transactionSchema = z
   .object({
     customer_id: optionalDbId(),
@@ -144,6 +144,8 @@ export const transactionSchema = z
     payment_method: z.enum(["TUNAI", "TRANSFER"]).default("TUNAI"),
     dp_amount: z.coerce.number().min(0, "DP tidak boleh negatif").default(0),
     customer_charges: z.array(customerChargeSchema).optional(),
+    /** Tanggal bisnis (YYYY-MM-DD). Kosong = jangan ubah created_at. */
+    transaction_date: z.union([z.iso.date(), z.literal("")]).optional(),
   })
   .refine(
     (data) => {
@@ -157,7 +159,18 @@ export const transactionSchema = z
       message: "DP harus lebih dari 0 dan kurang dari total tagihan",
       path: ["dp_amount"],
     }
-  );
+  )
+  .superRefine((data, ctx) => {
+    const dateStr = data.transaction_date;
+    if (!dateStr) return;
+    if (!isWibDateInAllowedRange(dateStr, TRANSACTION_DATE_MAX_LOOKBACK_DAYS)) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Tanggal harus hari ini atau maksimal ${TRANSACTION_DATE_MAX_LOOKBACK_DAYS} hari ke belakang`,
+        path: ["transaction_date"],
+      });
+    }
+  });
 
 export type TransactionFormValues = z.infer<typeof transactionSchema>;
 
@@ -211,6 +224,12 @@ export const productSchema = z.object({
     .number()
     .min(0, "Harga tidak boleh negatif")
     .max(999_999_999, "Harga terlalu besar"),
+  cost_price: z.coerce
+    .number()
+    .min(0, "Harga modal tidak boleh negatif")
+    .max(999_999_999, "Harga modal terlalu besar")
+    .optional()
+    .default(0),
 });
 
 export type ProductFormValues = z.infer<typeof productSchema>;
@@ -233,6 +252,7 @@ export const operationalCostSchema = z
       .max(999_999_999, "Jumlah terlalu besar"),
     category: z
       .string()
+      .min(1, "Kategori wajib diisi")
       .max(100, "Kategori maksimal 100 karakter")
       .optional()
       .default("LAINNYA"),

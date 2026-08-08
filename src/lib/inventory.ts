@@ -29,6 +29,7 @@ export type InventoryProductRow = {
   category_id: string | null;
   category: string;
   base_price: number;
+  cost_price: number;
   unit: string;
   min_stock: number;
   photo_url: string | null;
@@ -75,6 +76,7 @@ const inventoryProductBaseSchema = z.object({
     .min(1, "Pilih kategori")
     .pipe(dbId("ID kategori tidak valid")),
   base_price: z.coerce.number().min(0).max(999_999_999),
+  cost_price: z.coerce.number().min(0).max(999_999_999).optional().default(0),
   min_stock: z.coerce.number().int().min(0).max(999_999),
   description: z.string().max(500).optional().or(z.literal("")),
 });
@@ -84,6 +86,7 @@ const variantRowSchema = z
     warna: z.string().max(80).optional().or(z.literal("")),
     ukuran: z.string().max(80).optional().or(z.literal("")),
     base_price: z.coerce.number().min(0).max(999_999_999),
+    cost_price: z.coerce.number().min(0).max(999_999_999).optional().default(0),
     min_stock: z.coerce.number().int().min(0).max(999_999).optional(),
     initial_qty: z.coerce.number().int().min(0).max(999_999).optional(),
   })
@@ -105,6 +108,7 @@ const inventoryVariantUpdateSchema = z
     warna: z.string().max(80).optional().or(z.literal("")),
     ukuran: z.string().max(80).optional().or(z.literal("")),
     base_price: z.coerce.number().min(0).max(999_999_999),
+    cost_price: z.coerce.number().min(0).max(999_999_999).optional().default(0),
     min_stock: z.coerce.number().int().min(0).max(999_999),
   })
   .refine((v) => Boolean(v.warna?.trim()) || Boolean(v.ukuran?.trim()), {
@@ -116,6 +120,7 @@ const inventoryVariantAddSchema = z
     warna: z.string().max(80).optional().or(z.literal("")),
     ukuran: z.string().max(80).optional().or(z.literal("")),
     base_price: z.coerce.number().min(0).max(999_999_999),
+    cost_price: z.coerce.number().min(0).max(999_999_999).optional().default(0),
     min_stock: z.coerce.number().int().min(0).max(999_999),
     warehouse_id: dbId("ID gudang tidak valid")
       .optional()
@@ -290,7 +295,7 @@ export async function getInventoryProducts(): Promise<
     supabase
       .from("products")
       .select(
-        "id, name, category_id, category, base_price, unit, min_stock, photo_url, description, created_at, parent_id, warna, ukuran"
+        "id, name, category_id, category, base_price, cost_price, unit, min_stock, photo_url, description, created_at, parent_id, warna, ukuran"
       )
       .order("name")
       .order("id")
@@ -302,6 +307,7 @@ export async function getInventoryProducts(): Promise<
     data: data.map((p) => ({
       ...p,
       base_price: Number(p.base_price),
+      cost_price: Number(p.cost_price ?? 0),
       unit: p.unit || "pcs",
       min_stock: p.min_stock ?? 0,
       parent_id: p.parent_id ?? null,
@@ -765,6 +771,7 @@ export async function createInventoryProduct(
           category_id: parsed.data.category_id,
           category: cat.name || "LAINNYA",
           base_price: parsed.data.base_price,
+          cost_price: parsed.data.cost_price ?? 0,
           unit: "pcs",
           min_stock: parsed.data.min_stock,
           description: parsed.data.description?.trim() || null,
@@ -787,6 +794,7 @@ export async function createInventoryProduct(
             category_id: parsed.data.category_id,
             category: cat.name || "LAINNYA",
             base_price: v.base_price,
+            cost_price: v.cost_price ?? 0,
             unit: "pcs",
             min_stock: v.min_stock ?? parsed.data.min_stock,
             description: parsed.data.description?.trim() || null,
@@ -855,6 +863,7 @@ export async function createInventoryProduct(
         category_id: parsed.data.category_id,
         category: cat.name || "LAINNYA",
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         unit: "pcs",
         min_stock: parsed.data.min_stock,
         description: parsed.data.description?.trim() || null,
@@ -950,6 +959,7 @@ export async function updateInventoryProduct(
         category_id: parsed.data.category_id,
         category: cat?.name || "LAINNYA",
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         min_stock: parsed.data.min_stock,
         description: parsed.data.description?.trim() || null,
       })
@@ -1060,6 +1070,7 @@ export async function addInventoryVariant(
         category_id: parent.category_id,
         category: parent.category || "LAINNYA",
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         unit: "pcs",
         min_stock: parsed.data.min_stock,
         description: parent.description,
@@ -1172,6 +1183,7 @@ export async function updateInventoryVariant(
         warna: warna || null,
         ukuran: ukuran || null,
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         min_stock: parsed.data.min_stock,
       })
       .eq("id", id);

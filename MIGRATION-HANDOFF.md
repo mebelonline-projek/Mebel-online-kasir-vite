@@ -53,7 +53,7 @@ Jangan ulang port Gudang/Operasional/Piutang/Invoice/Pengaturan-toko/foto/Nota/H
 |-------|--------|
 | Search Gudang/Stok | SPA |
 | Varian `parent_id` / `warna` / `ukuran` | SPA |
-| Tanggal custom transaksi (create only) | SPA |
+| Tanggal custom transaksi (create + edit header) | SPA |
 | Upload foto barang | SPA |
 | Pengaturan toko + logo | SPA |
 | Kelola user (create/update/delete) | SPA + Edge |
@@ -77,13 +77,15 @@ Model: parent shell + child leaf; stok/kasir/Edge tetap per `product_id` leaf. S
 
 Untuk transaksi yang lupa diinput. Aturan:
 
-- Field `transaction_date` (`YYYY-MM-DD`) **hanya di form tambah**; mode edit tidak menampilkan / tidak mengirim.
-- Default hari ini WIB; batas `min` = hari ini − 365 hari, `max` = hari ini. Masa depan ditolak Zod (client + create path).
-- Kosong / tidak dikirim = hari ini (backward compatible dengan payload lama & antrean offline lama).
+- Field `transaction_date` (`YYYY-MM-DD`) di **kasir (create)** dan **edit header** (DP/LUNAS, 1 pembayaran).
+- Default / prefill: create = hari ini WIB; edit = tanggal bisnis dari `created_at` saat ini. Batas `min` = hari ini − 365 hari, `max` = hari ini. Masa depan ditolak Zod.
+- Create: kosong / tidak dikirim = hari ini (backward compatible dengan payload lama & antrean offline lama).
+- Edit: kirim tanggal terpilih → update `created_at` + `payment_date` pembayaran tunggal. (UI selalu mengirim tanggal; kosong di schema = jangan ubah — cadangan API.)
 - **Tanpa kolom DB baru.** Client menulis `transactions.created_at` dan `transaction_payments.payment_date` (pembayaran awal) = `${tanggal}T12:00:00+07:00`.
-- Nomor `TRX-YYYYMMDD-NNN` tetap dari trigger DB (hari input), bukan tanggal jual. Stok tetap dipotong saat create.
+- Nomor `TRX-YYYYMMDD-NNN` tetap dari trigger DB (hari input), bukan tanggal jual. Stok tetap dipotong saat create; edit tanggal tidak mengubah stok.
+- List `/transaksi`: urut `created_at` DESC, tie-break `transaction_number` DESC. Merge pending+server **sort ulang** (jangan prepend pending). Transaksi mundur masuk blok tanggalnya (mis. tanggal 4 setelah blok 5), bukan loncat ke paling atas.
 - Dashboard mengikuti **periode kalender berjalan**, jadi transaksi mundur bisa muncul di mingguan/tahunan tapi tidak di harian/bulanan (mis. 31 Jul saat hari ini 1 Agu). Ini benar, bukan bug.
-- Helper: `wibNoonISO`, `getTransactionDateBounds`, `isWibDateInAllowedRange` di `src/lib/date-utils.ts`; UI di `src/pages/kasir-page.tsx`.
+- Helper: `wibNoonISO`, `getTransactionDateBounds`, `isWibDateInAllowedRange` di `src/lib/date-utils.ts`; UI di `src/pages/kasir-page.tsx` + `src/pages/transaksi-edit-page.tsx`.
 
 #### Tanggal custom biaya operasional — kontrak (sudah di SPA)
 

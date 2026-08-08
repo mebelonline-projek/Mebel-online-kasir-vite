@@ -6,7 +6,7 @@ import type { InvoiceLineItem } from "@/components/invoice/invoice-document";
 import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import { buildNotaPdfData } from "@/lib/pdf-invoice";
+import { buildNotaPdfData, resolveNotaCatatan } from "@/lib/pdf-invoice";
 import { printNotaHtml } from "@/lib/print-nota-html";
 import {
   downloadBlob,
@@ -41,6 +41,7 @@ interface NotaProps {
   transaction_id: string;
   transaction_number: string;
   customer_name: string;
+  description?: string | null;
   lineItems: InvoiceLineItem[];
   customerCharges?: CustomerChargeItem[];
   final_price: number;
@@ -59,6 +60,7 @@ export function NotaDocument({
   transaction_id,
   transaction_number,
   customer_name,
+  description = null,
   lineItems,
   customerCharges = [],
   final_price,
@@ -90,6 +92,7 @@ export function NotaDocument({
   const totalDue = final_price + chargesTotal;
   const remaining = totalDue - totalPaid;
   const itemsSubtotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
+  const catatan = resolveNotaCatatan(description, lineItems);
 
   const handleSavePdf = async () => {
     setSavingPdf(true);
@@ -114,6 +117,7 @@ export function NotaDocument({
     customer_name,
     payment_type,
     created_at,
+    description: catatan,
     lineItems,
     customerCharges,
     final_price,
@@ -143,6 +147,7 @@ export function NotaDocument({
         customer_name,
         payment_type,
         created_at_label: formatDate(created_at),
+        description: catatan,
         lineItems,
         customerCharges,
         final_price,
@@ -358,6 +363,18 @@ export function NotaDocument({
             </tr>
           </tbody>
         </table>
+
+        {catatan && (
+          <>
+            <div className="my-4 border-t border-dashed border-gray-300" />
+            <div className="mb-2">
+              <h3 className="mb-1 text-xs font-bold tracking-wider text-gray-500 uppercase">
+                Catatan
+              </h3>
+              <p className="text-xs text-gray-800 whitespace-pre-wrap">{catatan}</p>
+            </div>
+          </>
+        )}
 
         <div className="my-4 border-t border-dashed border-gray-300" />
 

@@ -14,6 +14,7 @@ export interface ProductRow {
   category_id: string | null;
   description: string | null;
   base_price: number;
+  cost_price: number;
   unit: string;
   created_at: string;
 }
@@ -85,7 +86,7 @@ export async function listProducts(
     const { data, error } = await supabase
       .from("products")
       .select(
-        "id, name, category, category_id, description, base_price, unit, created_at"
+        "id, name, category, category_id, description, base_price, cost_price, unit, created_at"
       )
       .order("name")
       .limit(limit);
@@ -95,6 +96,7 @@ export async function listProducts(
       data: (data || []).map((p) => ({
         ...p,
         base_price: Number(p.base_price),
+        cost_price: Number(p.cost_price ?? 0),
         unit: p.unit || "pcs",
       })) as ProductRow[],
     };
@@ -139,6 +141,7 @@ export async function createProduct(
         category_id: parsed.data.category_id,
         category: cat.name || "LAINNYA",
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         unit: "pcs",
         description: parsed.data.description?.trim() || null,
         created_by: auth.user.id,
@@ -210,6 +213,7 @@ export async function updateProduct(
         category_id: parsed.data.category_id,
         category: cat?.name || "LAINNYA",
         base_price: parsed.data.base_price,
+        cost_price: parsed.data.cost_price ?? 0,
         description: parsed.data.description?.trim() || null,
       })
       .eq("id", id);

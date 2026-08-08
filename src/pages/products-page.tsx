@@ -50,6 +50,7 @@ type FormState = {
   category_id: string;
   description: string;
   base_price: string;
+  cost_price: string;
 };
 
 const emptyForm: FormState = {
@@ -57,6 +58,7 @@ const emptyForm: FormState = {
   category_id: "",
   description: "",
   base_price: "",
+  cost_price: "",
 };
 
 export function ProductsPage() {
@@ -122,6 +124,7 @@ export function ProductsPage() {
       category_id: row.category_id || "",
       description: row.description || "",
       base_price: String(row.base_price || ""),
+      cost_price: row.cost_price > 0 ? String(row.cost_price) : "",
     });
     setNewCategory("");
     setDialogOpen(true);
@@ -150,6 +153,7 @@ export function ProductsPage() {
       category_id: form.category_id,
       description: form.description,
       base_price: Number(form.base_price) || 0,
+      cost_price: Number(form.cost_price) || 0,
     };
     const result = editing
       ? await updateProduct(editing.id, payload)
@@ -380,6 +384,16 @@ export function ProductsPage() {
                 value={form.base_price}
                 onChange={(v) => setForm({ ...form, base_price: v })}
               />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Harga modal</label>
+              <CurrencyInput
+                value={form.cost_price}
+                onChange={(v) => setForm({ ...form, cost_price: v })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Opsional — auto HPP saat jual
+              </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Deskripsi</label>

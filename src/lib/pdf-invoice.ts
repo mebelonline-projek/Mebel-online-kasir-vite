@@ -59,6 +59,22 @@ export function mapTransactionLineItems(
   ];
 }
 
+/**
+ * Catatan nota: hanya deskripsi user, bukan ringkasan auto nama barang
+ * (supaya tidak dobel dengan baris produk).
+ */
+export function resolveNotaCatatan(
+  description: string | null | undefined,
+  lineItems: Array<{ product_name: string }>
+): string | null {
+  const text = description?.trim() || "";
+  if (!text) return null;
+  if (lineItems.length === 0) return null;
+  const autoSummary = lineItems.map((i) => i.product_name).join(", ");
+  if (text === autoSummary) return null;
+  return text;
+}
+
 export async function buildNotaPdfData(
   transactionId: string,
   client: SupabaseClient = supabase
@@ -138,7 +154,10 @@ export async function buildNotaPdfData(
     customerAddress: null,
     productName: lineItems.map((i) => i.product_name).join(", "),
     productDescription: null,
-    description: transaction.description || null,
+    description: resolveNotaCatatan(
+      transaction.description,
+      lineItems
+    ),
     lineItems,
     customerCharges,
     finalPrice: goodsPrice,

@@ -22,6 +22,7 @@ export interface CachedProduct {
   name: string;
   category: string;
   base_price: number;
+  cost_price: number;
   unit: string;
   parent_id: string | null;
   warna: string | null;

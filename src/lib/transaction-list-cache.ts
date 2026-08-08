@@ -58,11 +58,24 @@ export function mergeTransactionRows(
           p.status === "failed") &&
         !serverClientIds.has(p.clientId)
     )
-    .map(pendingToRow)
-    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+    .map(pendingToRow);
 
   const serverCached = server.map(serverToCached);
-  return [...pendingRows, ...serverCached].slice(0, CACHE_LIMIT);
+  return [...pendingRows, ...serverCached]
+    .sort((a, b) => {
+      if (a.created_at !== b.created_at) {
+        return a.created_at < b.created_at ? 1 : -1;
+      }
+      // Dalam tanggal sama: pending lokal di awal blok, lalu nomor TRX DESC
+      if (Boolean(a.offlinePending) !== Boolean(b.offlinePending)) {
+        return a.offlinePending ? -1 : 1;
+      }
+      if (a.transaction_number !== b.transaction_number) {
+        return a.transaction_number < b.transaction_number ? 1 : -1;
+      }
+      return (b.cachedAt || 0) - (a.cachedAt || 0);
+    })
+    .slice(0, CACHE_LIMIT);
 }
 
 export async function getPendingOpen(): Promise<PendingTransaction[]> {

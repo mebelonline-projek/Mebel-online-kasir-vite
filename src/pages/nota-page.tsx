@@ -83,6 +83,7 @@ export function NotaPage() {
         transaction_id={tx.id}
         transaction_number={tx.transaction_number}
         customer_name={tx.customer_name || "—"}
+        description={tx.description}
         lineItems={lineItems}
         customerCharges={tx.transaction_customer_charges.map((c) => ({
           name: c.name,
