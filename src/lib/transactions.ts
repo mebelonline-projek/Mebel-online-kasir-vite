@@ -158,6 +158,96 @@ async function restoreSaleStockViaEdge(
   }
 }
 
+/** Alokasi final_price baru ke baris item (qty/produk tetap). */
+export function allocateLineTotalsToFinalPrice(
+  items: Array<{ id: string; quantity: number; line_total: number }>,
+  finalPrice: number
+): Array<{ id: string; unit_price: number; line_total: number }> {
+  if (items.length === 0) return [];
+  const target = toRupiahInteger(finalPrice);
+  const qtyOf = (n: number) => Math.max(1, Math.round(Number(n) || 1));
+
+  if (items.length === 1) {
+    const q = qtyOf(items[0].quantity);
+    const line_total = target;
+    const unit_price = q === 1 ? line_total : Math.max(1, Math.floor(line_total / q));
+    return [{ id: items[0].id, unit_price, line_total }];
+  }
+
+  const oldSum = items.reduce((s, i) => s + (Number(i.line_total) || 0), 0);
+  const allocated: Array<{ id: string; unit_price: number; line_total: number }> =
+    [];
+  let used = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const q = qtyOf(item.quantity);
+    let line_total: number;
+    if (i === items.length - 1) {
+      line_total = Math.max(0, target - used);
+    } else if (oldSum > 0) {
+      line_total = Math.floor(
+        (target * (Number(item.line_total) || 0)) / oldSum
+      );
+      used += line_total;
+    } else {
+      line_total = Math.floor(target / items.length);
+      used += line_total;
+    }
+    const unit_price =
+      line_total <= 0 ? 0 : q === 1 ? line_total : Math.max(1, Math.floor(line_total / q));
+    allocated.push({ id: item.id, unit_price, line_total });
+  }
+
+  return allocated;
+}
+
+async function syncTransactionItemPrices(
+  transactionId: string,
+  finalPrice: number
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { data: items, error } = await supabase
+    .from("transaction_items")
+    .select("id, quantity, line_total, sort_order")
+    .eq("transaction_id", transactionId)
+    .order("sort_order", { ascending: true });
+
+  if (error) {
+    return { ok: false, message: `Gagal baca item: ${error.message}` };
+  }
+  if (!items || items.length === 0) return { ok: true };
+
+  const oldSum = items.reduce((s, i) => s + (Number(i.line_total) || 0), 0);
+  if (oldSum === finalPrice) return { ok: true };
+
+  const patches = allocateLineTotalsToFinalPrice(
+    items.map((i) => ({
+      id: i.id as string,
+      quantity: Number(i.quantity) || 1,
+      line_total: Number(i.line_total) || 0,
+    })),
+    finalPrice
+  );
+
+  for (const patch of patches) {
+    const { error: updError } = await supabase
+      .from("transaction_items")
+      .update({
+        unit_price: patch.unit_price,
+        line_total: patch.line_total,
+      })
+      .eq("id", patch.id);
+    if (updError) {
+      return {
+        ok: false,
+        message: `Gagal sync harga item: ${updError.message}`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
 async function syncLinkedInvoiceTotals(transactionIds: string[]): Promise<void> {
   if (transactionIds.length === 0) return;
 
@@ -896,6 +986,11 @@ export async function updateTransaction(
       .eq("id", id);
 
     if (updateError) return { success: false, message: updateError.message };
+
+    const itemSync = await syncTransactionItemPrices(id, finalPrice);
+    if (!itemSync.ok) {
+      return { success: false, message: itemSync.message };
+    }
 
     await supabase
       .from("transaction_customer_charges")
