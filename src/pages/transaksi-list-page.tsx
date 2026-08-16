@@ -35,9 +35,12 @@ import { useLiveData } from "@/hooks/use-live-data";
 import { downloadCsv } from "@/lib/export-csv";
 import type { CachedTransactionRow } from "@/lib/offline-db";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import type { TransactionListStats } from "@/lib/transactions";
 import {
   getCachedTransactionList,
+  getCachedTransactionListStats,
   loadTransactionListLive,
+  loadTransactionListStatsLive,
 } from "@/lib/transaction-list-cache";
 
 const STATUS_OPTIONS = [
@@ -65,6 +68,15 @@ function rowsEqual(a: CachedTransactionRow[], b: CachedTransactionRow[]) {
   return true;
 }
 
+function statsEqual(a: TransactionListStats, b: TransactionListStats) {
+  return (
+    a.total === b.total &&
+    a.lunas === b.lunas &&
+    a.menunggu === b.menunggu &&
+    a.batal === b.batal
+  );
+}
+
 function displayStatus(row: CachedTransactionRow) {
   if (row.offlinePending) {
     return row.status === "GAGAL" ? "GAGAL" : "MENYIMPAN";
@@ -84,6 +96,15 @@ export function TransaksiListPage() {
     isEqual: rowsEqual,
   });
 
+  const {
+    data: stats,
+    error: statsError,
+  } = useLiveData({
+    getCached: getCachedTransactionListStats,
+    fetcher: loadTransactionListStatsLive,
+    isEqual: statsEqual,
+  });
+
   const [searchQuery, setSearchQuery] = useState(
     () => searchParams.get("q") || ""
   );
@@ -99,6 +120,10 @@ export function TransaksiListPage() {
   }, [error]);
 
   useEffect(() => {
+    if (statsError) toast.error(statsError);
+  }, [statsError]);
+
+  useEffect(() => {
     const next = new URLSearchParams();
     if (searchQuery.trim()) next.set("q", searchQuery.trim());
     if (statusValue !== "semua") next.set("status", statusValue);
@@ -111,6 +136,12 @@ export function TransaksiListPage() {
   }, [searchQuery, statusValue, fulfillmentValue, searchParams, setSearchParams]);
 
   const list = rows ?? [];
+  const displayStats: TransactionListStats = stats ?? {
+    total: 0,
+    lunas: 0,
+    menunggu: 0,
+    batal: 0,
+  };
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -139,19 +170,6 @@ export function TransaksiListPage() {
       return hay.includes(q);
     });
   }, [list, searchQuery, statusValue, fulfillmentValue]);
-
-  const stats = useMemo(() => {
-    let lunas = 0;
-    let menunggu = 0;
-    let batal = 0;
-    for (const row of list) {
-      const s = displayStatus(row);
-      if (s === "LUNAS") lunas += 1;
-      else if (s === "BATAL" || s === "GAGAL") batal += 1;
-      else menunggu += 1;
-    }
-    return { total: list.length, lunas, menunggu, batal };
-  }, [list]);
 
   const isFiltered =
     Boolean(searchQuery) ||
@@ -185,25 +203,25 @@ export function TransaksiListPage() {
   const statCards = [
     {
       label: "Total Transaksi",
-      value: stats.total,
+      value: displayStats.total,
       icon: Receipt,
       className: "text-foreground",
     },
     {
       label: "Lunas",
-      value: stats.lunas,
+      value: displayStats.lunas,
       icon: CheckCircle,
       className: "text-emerald-600 dark:text-emerald-400",
     },
     {
       label: "Menunggu",
-      value: stats.menunggu,
+      value: displayStats.menunggu,
       icon: Clock,
       className: "text-amber-600 dark:text-amber-400",
     },
     {
       label: "Batal",
-      value: stats.batal,
+      value: displayStats.batal,
       icon: XCircle,
       className: "text-destructive",
     },

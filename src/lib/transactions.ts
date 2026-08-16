@@ -714,6 +714,51 @@ export async function listRecentTransactions(
   }
 }
 
+/** Count penuh untuk kartu Total/Lunas/Menunggu/Batal (bukan window list). */
+export interface TransactionListStats {
+  total: number;
+  lunas: number;
+  menunggu: number;
+  batal: number;
+}
+
+export async function getTransactionStatusCounts(): Promise<
+  ActionState<TransactionListStats>
+> {
+  try {
+    const [totalRes, lunasRes, batalRes] = await Promise.all([
+      supabase.from("transactions").select("id", { count: "exact", head: true }),
+      supabase
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "LUNAS"),
+      supabase
+        .from("transactions")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "BATAL"),
+    ]);
+
+    const firstError =
+      totalRes.error || lunasRes.error || batalRes.error;
+    if (firstError) {
+      return { success: false, message: firstError.message };
+    }
+
+    const total = totalRes.count ?? 0;
+    const lunas = lunasRes.count ?? 0;
+    const batal = batalRes.count ?? 0;
+    const menunggu = Math.max(0, total - lunas - batal);
+
+    return { success: true, data: { total, lunas, menunggu, batal } };
+  } catch (error) {
+    return {
+      success: false,
+      message:
+        error instanceof Error ? error.message : "Gagal menghitung transaksi",
+    };
+  }
+}
+
 export async function getTransactionById(
   id: string
 ): Promise<ActionState<TransactionDetail>> {

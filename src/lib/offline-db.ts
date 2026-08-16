@@ -71,6 +71,16 @@ export interface CachedDashboardRow {
   cachedAt: number;
 }
 
+/** Snapshot count kartu list transaksi (bukan window 50). */
+export interface CachedTransactionListStats {
+  id: "transaction-list-stats";
+  total: number;
+  lunas: number;
+  menunggu: number;
+  batal: number;
+  cachedAt: number;
+}
+
 class OfflineDatabase extends Dexie {
   pendingTransactions!: EntityTable<PendingTransaction, "clientId">;
   cachedCustomers!: EntityTable<CachedCustomer, "id">;
@@ -79,6 +89,7 @@ class OfflineDatabase extends Dexie {
   cachedWarehouses!: EntityTable<CachedWarehouse, "id">;
   cachedStocks!: EntityTable<CachedStock, "id">;
   cachedDashboard!: EntityTable<CachedDashboardRow, "period">;
+  cachedTransactionListStats!: EntityTable<CachedTransactionListStats, "id">;
 
   constructor() {
     super("MebelMonitorSpaOffline");
@@ -109,6 +120,16 @@ class OfflineDatabase extends Dexie {
       cachedWarehouses: "id, name, cachedAt",
       cachedStocks: "id, warehouse_id, product_id, cachedAt",
       cachedDashboard: "period, cachedAt",
+    });
+    this.version(5).stores({
+      pendingTransactions: "clientId, status, createdAt",
+      cachedCustomers: "id, name, cachedAt",
+      cachedProducts: "id, name, cachedAt",
+      cachedTransactions: "id, created_at, cachedAt, client_id",
+      cachedWarehouses: "id, name, cachedAt",
+      cachedStocks: "id, warehouse_id, product_id, cachedAt",
+      cachedDashboard: "period, cachedAt",
+      cachedTransactionListStats: "id, cachedAt",
     });
   }
 }

@@ -1,13 +1,21 @@
-import type { TransactionRow } from "@/lib/transactions";
-import { listRecentTransactions } from "@/lib/transactions";
+import type {
+  TransactionListStats,
+  TransactionRow,
+} from "@/lib/transactions";
+import {
+  getTransactionStatusCounts,
+  listRecentTransactions,
+} from "@/lib/transactions";
 import {
   offlineDb,
+  type CachedTransactionListStats,
   type CachedTransactionRow,
   type PendingTransaction,
 } from "@/lib/offline-db";
 import { getWibDateString, wibNoonISO } from "@/lib/date-utils";
 
 const CACHE_LIMIT = 50;
+const STATS_CACHE_ID = "transaction-list-stats" as const;
 
 function pendingToRow(item: PendingTransaction): CachedTransactionRow {
   const isCash = item.payload.payment_type === "CASH";
@@ -141,4 +149,104 @@ export async function loadTransactionListLive(
 
   await saveTransactionListCache(result.data);
   return mergeTransactionRows(result.data, pending);
+}
+
+function emptyStats(): TransactionListStats {
+  return { total: 0, lunas: 0, menunggu: 0, batal: 0 };
+}
+
+function addPendingToStats(
+  base: TransactionListStats,
+  pending: PendingTransaction[]
+): TransactionListStats {
+  const next = { ...base };
+  for (const item of pending) {
+    if (
+      item.status !== "pending" &&
+      item.status !== "syncing" &&
+      item.status !== "failed"
+    ) {
+      continue;
+    }
+    next.total += 1;
+    // Selaras displayStatus list: GAGAL → Batal, selain itu MENYIMPAN → Menunggu
+    if (item.status === "failed") {
+      next.batal += 1;
+    } else {
+      next.menunggu += 1;
+    }
+  }
+  return next;
+}
+
+function statsFromCachedRows(
+  rows: CachedTransactionRow[]
+): TransactionListStats {
+  let lunas = 0;
+  let menunggu = 0;
+  let batal = 0;
+  for (const row of rows) {
+    const s = row.status;
+    if (s === "LUNAS") lunas += 1;
+    else if (s === "BATAL" || s === "GAGAL") batal += 1;
+    else menunggu += 1;
+  }
+  return { total: rows.length, lunas, menunggu, batal };
+}
+
+export async function saveTransactionListStatsCache(
+  stats: TransactionListStats
+): Promise<void> {
+  if (!offlineDb) return;
+  const row: CachedTransactionListStats = {
+    id: STATS_CACHE_ID,
+    ...stats,
+    cachedAt: Date.now(),
+  };
+  await offlineDb.cachedTransactionListStats.put(row);
+}
+
+/** Paint instan: last known DB counts + pending lokal yang belum di server. */
+export async function getCachedTransactionListStats(): Promise<TransactionListStats> {
+  if (!offlineDb) return emptyStats();
+  const [cached, pending, recent] = await Promise.all([
+    offlineDb.cachedTransactionListStats.get(STATS_CACHE_ID),
+    getPendingOpen(),
+    offlineDb.cachedTransactions
+      .orderBy("created_at")
+      .reverse()
+      .limit(CACHE_LIMIT)
+      .toArray(),
+  ]);
+
+  if (cached) {
+    const { id: _id, cachedAt: _c, ...counts } = cached;
+    return addPendingToStats(counts, pending);
+  }
+
+  // Belum pernah fetch count penuh — fallback window cache (bisa undercount).
+  const asServer: TransactionRow[] = recent
+    .filter((r) => !r.offlinePending)
+    .map(({ offlinePending: _o, cachedAt: _c, ...rest }) => rest);
+  return statsFromCachedRows(mergeTransactionRows(asServer, pending));
+}
+
+/**
+ * Count penuh dari DB + pending lokal. Cache last-known untuk offline.
+ */
+export async function loadTransactionListStatsLive(): Promise<TransactionListStats> {
+  if (!navigator.onLine) {
+    return getCachedTransactionListStats();
+  }
+
+  const pending = await getPendingOpen();
+  const result = await getTransactionStatusCounts();
+  if (!result.success || !result.data) {
+    const fallback = await getCachedTransactionListStats();
+    if (fallback.total > 0 || pending.length > 0) return fallback;
+    throw new Error(result.message || "Gagal menghitung transaksi");
+  }
+
+  await saveTransactionListStatsCache(result.data);
+  return addPendingToStats(result.data, pending);
 }
