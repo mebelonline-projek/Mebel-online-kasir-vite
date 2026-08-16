@@ -5,8 +5,7 @@ import type {
 import {
   findExistingClientIds,
   getTransactionStatusCounts,
-  listRecentTransactions,
-  listTransactionsByStatuses,
+  listTransactionsQuery,
 } from "@/lib/transactions";
 import {
   offlineDb,
@@ -17,6 +16,8 @@ import {
 import { getWibDateString, wibNoonISO } from "@/lib/date-utils";
 
 export const CACHE_LIMIT = 50;
+/** Hasil search boleh lebih banyak; query tetap mencari di seluruh tabel. */
+export const SEARCH_RESULT_LIMIT = 100;
 const STATS_CACHE_ID = "transaction-list-stats" as const;
 
 function pendingToRow(item: PendingTransaction): CachedTransactionRow {
@@ -137,10 +138,25 @@ export type TransactionListLoadOptions = {
   limit?: number;
   /** null/undefined = recent semua status; array = filter status server. */
   statuses?: string[] | null;
+  /** Kata kunci — dicari di seluruh DB (bukan hanya window recent). */
+  q?: string | null;
 };
 
+function rowMatchesQuery(row: CachedTransactionRow, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  const hay = [
+    row.transaction_number,
+    row.customer_name || "",
+    row.description || "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  return hay.includes(needle);
+}
+
 /**
- * Fetch network + merge pending + tulis cache (hanya untuk list unfiltered).
+ * Fetch network + merge pending + tulis cache (hanya untuk list unfiltered tanpa search).
  * Multi-device: selalu network saat online; cache hanya percepat UI lokal.
  */
 export async function loadTransactionListLive(
@@ -148,36 +164,54 @@ export async function loadTransactionListLive(
 ): Promise<CachedTransactionRow[]> {
   const opts: TransactionListLoadOptions =
     typeof options === "number" ? { limit: options } : options;
-  const limit = opts.limit ?? CACHE_LIMIT;
+  const q = (opts.q ?? "").trim();
   const statuses = opts.statuses ?? null;
   const filtered = Boolean(statuses && statuses.length > 0);
+  const searching = q.length > 0;
+  const limit =
+    opts.limit ?? (searching ? SEARCH_RESULT_LIMIT : CACHE_LIMIT);
 
   if (!navigator.onLine) {
-    const cached = await getCachedTransactionList();
-    if (!filtered) return cached;
-    return cached.filter((row) => statuses!.includes(row.status));
+    let cached = await getCachedTransactionList();
+    if (filtered) {
+      cached = cached.filter((row) => statuses!.includes(row.status));
+    }
+    if (searching) {
+      cached = cached.filter((row) => rowMatchesQuery(row, q));
+    }
+    return cached;
   }
 
   const pending = await getPendingOpen();
-  const result = filtered
-    ? await listTransactionsByStatuses(statuses!, limit)
-    : await listRecentTransactions(limit);
+  const result = await listTransactionsQuery({
+    q: searching ? q : undefined,
+    statuses: filtered ? statuses : null,
+    limit,
+  });
 
   if (!result.success || !result.data) {
-    const fallback = await getCachedTransactionList();
-    if (fallback.length > 0) {
-      return filtered
-        ? fallback.filter((row) => statuses!.includes(row.status))
-        : fallback;
+    let fallback = await getCachedTransactionList();
+    if (filtered) {
+      fallback = fallback.filter((row) => statuses!.includes(row.status));
     }
+    if (searching) {
+      fallback = fallback.filter((row) => rowMatchesQuery(row, q));
+    }
+    if (fallback.length > 0) return fallback;
     throw new Error(result.message || "Gagal memuat transaksi");
   }
 
-  // Jangan overwrite cache recent-50 dengan hasil filter status.
-  if (!filtered) {
+  // Jangan overwrite cache recent-50 dengan hasil filter/search.
+  if (!filtered && !searching) {
     await saveTransactionListCache(result.data);
   }
-  return mergeTransactionRows(result.data, pending, limit);
+
+  let merged = mergeTransactionRows(result.data, pending, limit);
+  if (searching) {
+    // Pending lokal yang match kata kunci ikut tampil
+    merged = merged.filter((row) => rowMatchesQuery(row, q));
+  }
+  return merged;
 }
 
 function emptyStats(): TransactionListStats {

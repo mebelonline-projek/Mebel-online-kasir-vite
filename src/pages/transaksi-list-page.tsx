@@ -128,12 +128,22 @@ export function TransaksiListPage() {
   const [searchQuery, setSearchQuery] = useState(
     () => searchParams.get("q") || ""
   );
+  const [debouncedQ, setDebouncedQ] = useState(
+    () => (searchParams.get("q") || "").trim()
+  );
   const [statusValue, setStatusValue] = useState(
     () => normalizeStatusFilter(searchParams.get("status"))
   );
   const [fulfillmentValue, setFulfillmentValue] = useState(
     () => searchParams.get("fulfillment") || "semua"
   );
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedQ(searchQuery.trim());
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
 
   const {
     data: rows,
@@ -145,8 +155,9 @@ export function TransaksiListPage() {
     getCached: getCachedTransactionList,
     fetcher: () =>
       loadTransactionListLive({
-        limit: CACHE_LIMIT,
+        limit: debouncedQ ? undefined : CACHE_LIMIT,
         statuses: statusesForFilter(statusValue),
+        q: debouncedQ || null,
       }),
     isEqual: rowsEqual,
   });
@@ -159,7 +170,7 @@ export function TransaksiListPage() {
 
   useEffect(() => {
     void refresh();
-  }, [statusValue, refresh]);
+  }, [statusValue, debouncedQ, refresh]);
 
   useEffect(() => {
     if (error) toast.error(error);
@@ -190,7 +201,7 @@ export function TransaksiListPage() {
   };
 
   const filtered = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    // Teks sudah di-query server (atau cache offline); sisa filter status + pesanan.
     return list.filter((row) => {
       if (!matchesStatusFilter(row, statusValue)) return false;
       if (fulfillmentValue !== "semua") {
@@ -198,17 +209,9 @@ export function TransaksiListPage() {
         const f = row.fulfillment_status || "MENUNGGU";
         if (f !== fulfillmentValue) return false;
       }
-      if (!q) return true;
-      const hay = [
-        row.transaction_number,
-        row.customer_name || "",
-        row.description || "",
-      ]
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
+      return true;
     });
-  }, [list, searchQuery, statusValue, fulfillmentValue]);
+  }, [list, statusValue, fulfillmentValue]);
 
   const isFiltered =
     Boolean(searchQuery) ||
@@ -239,8 +242,8 @@ export function TransaksiListPage() {
     toast.success("CSV berhasil diunduh");
   }
 
-  const emptyHint = searchQuery.trim()
-    ? `Tidak ada transaksi dengan kata kunci "${searchQuery.trim()}"`
+  const emptyHint = debouncedQ
+    ? `Tidak ada transaksi dengan kata kunci "${debouncedQ}"`
     : statusValue !== "semua" || fulfillmentValue !== "semua"
       ? "Tidak ada transaksi untuk filter ini. Coba Reset."
       : "Buat transaksi pertama untuk mulai mencatat penjualan.";
@@ -312,7 +315,10 @@ export function TransaksiListPage() {
       <div className="flex flex-col gap-3 sm:flex-row">
         <form
           className="flex flex-1 gap-2"
-          onSubmit={(e) => e.preventDefault()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            setDebouncedQ(searchQuery.trim());
+          }}
         >
           <div className="relative w-full flex-1 sm:max-w-sm">
             <Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

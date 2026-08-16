@@ -688,44 +688,28 @@ export async function createTransaction(
   }
 }
 
-export async function listRecentTransactions(
-  limit = 30
-): Promise<ActionState<TransactionRow[]>> {
-  try {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(
-        "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, fulfillment_status, created_at, client_id"
-      )
-      .order("created_at", { ascending: false })
-      .order("transaction_number", { ascending: false })
-      .limit(limit);
-
-    if (error) {
-      return { success: false, message: error.message };
-    }
-
-    return { success: true, data: (data ?? []) as TransactionRow[] };
-  } catch (error) {
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : "Gagal memuat transaksi",
-    };
-  }
-}
-
 const LIST_SELECT =
   "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, fulfillment_status, created_at, client_id";
 
-/** List by status (untuk filter chip) — bukan window “semua status”. */
-export async function listTransactionsByStatuses(
-  statuses: string[],
-  limit = 50
-): Promise<ActionState<TransactionRow[]>> {
+/** Strip metachar PostgREST dari kata kunci user. */
+function sanitizeSearchQuery(q: string): string {
+  return q.replace(/[%_,.()\\]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * List transaksi dengan optional search (seluruh DB via ilike) + filter status.
+ * Search membatasi jumlah hasil (limit), bukan membatasi ruang pencarian ke 50 terbaru.
+ */
+export async function listTransactionsQuery(params: {
+  q?: string;
+  statuses?: string[] | null;
+  limit?: number;
+} = {}): Promise<ActionState<TransactionRow[]>> {
   try {
-    if (statuses.length === 0) {
-      return { success: true, data: [] };
-    }
+    const limit = params.limit ?? 50;
+    const statuses = params.statuses ?? null;
+    const safeQ = params.q ? sanitizeSearchQuery(params.q) : "";
+
     let query = supabase
       .from("transactions")
       .select(LIST_SELECT)
@@ -733,10 +717,17 @@ export async function listTransactionsByStatuses(
       .order("transaction_number", { ascending: false })
       .limit(limit);
 
-    query =
-      statuses.length === 1
-        ? query.eq("status", statuses[0])
-        : query.in("status", statuses);
+    if (statuses && statuses.length === 1) {
+      query = query.eq("status", statuses[0]);
+    } else if (statuses && statuses.length > 1) {
+      query = query.in("status", statuses);
+    }
+
+    if (safeQ) {
+      query = query.or(
+        `transaction_number.ilike.%${safeQ}%,customer_name.ilike.%${safeQ}%,description.ilike.%${safeQ}%`
+      );
+    }
 
     const { data, error } = await query;
     if (error) {
@@ -749,6 +740,20 @@ export async function listTransactionsByStatuses(
       message: error instanceof Error ? error.message : "Gagal memuat transaksi",
     };
   }
+}
+
+export async function listRecentTransactions(
+  limit = 30
+): Promise<ActionState<TransactionRow[]>> {
+  return listTransactionsQuery({ limit });
+}
+
+/** List by status (untuk filter chip) — bukan window “semua status”. */
+export async function listTransactionsByStatuses(
+  statuses: string[],
+  limit = 50
+): Promise<ActionState<TransactionRow[]>> {
+  return listTransactionsQuery({ statuses, limit });
 }
 
 /** client_id pending yang sudah ada di server (hindari double-count stats). */
