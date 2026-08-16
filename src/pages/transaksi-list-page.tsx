@@ -37,15 +37,18 @@ import type { CachedTransactionRow } from "@/lib/offline-db";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import type { TransactionListStats } from "@/lib/transactions";
 import {
+  CACHE_LIMIT,
   getCachedTransactionList,
   getCachedTransactionListStats,
   loadTransactionListLive,
   loadTransactionListStatsLive,
+  statusesForFilter,
 } from "@/lib/transaction-list-cache";
 
 const STATUS_OPTIONS = [
   { value: "semua", label: "Semua" },
   { value: "LUNAS", label: "Lunas" },
+  { value: "belum_lunas", label: "Belum Lunas" },
   { value: "DP", label: "DP" },
   { value: "MENUNGGU_PELUNASAN", label: "Menunggu Pelunasan" },
   { value: "BATAL", label: "Batal" },
@@ -84,26 +87,38 @@ function displayStatus(row: CachedTransactionRow) {
   return row.status;
 }
 
+/** Status untuk filter (pakai status DB, bukan label MENYIMPAN). */
+function filterStatus(row: CachedTransactionRow) {
+  return row.status;
+}
+
+function matchesStatusFilter(
+  row: CachedTransactionRow,
+  statusValue: string
+): boolean {
+  if (statusValue === "semua") return true;
+  if (statusValue === "GAGAL") {
+    return row.offlinePending === true && row.status === "GAGAL";
+  }
+  if (statusValue === "belum_lunas") {
+    return (
+      filterStatus(row) === "DP" || filterStatus(row) === "MENUNGGU_PELUNASAN"
+    );
+  }
+  if (statusValue === "BATAL") {
+    return (
+      filterStatus(row) === "BATAL" ||
+      (row.offlinePending === true && row.status === "GAGAL")
+    );
+  }
+  return filterStatus(row) === statusValue;
+}
+
 export function TransaksiListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { role } = useAuth();
   const isOwner = role === "OWNER";
-
-  const { data: rows, loading, refreshing, error } = useLiveData({
-    getCached: getCachedTransactionList,
-    fetcher: () => loadTransactionListLive(50),
-    isEqual: rowsEqual,
-  });
-
-  const {
-    data: stats,
-    error: statsError,
-  } = useLiveData({
-    getCached: getCachedTransactionListStats,
-    fetcher: loadTransactionListStatsLive,
-    isEqual: statsEqual,
-  });
 
   const [searchQuery, setSearchQuery] = useState(
     () => searchParams.get("q") || ""
@@ -114,6 +129,33 @@ export function TransaksiListPage() {
   const [fulfillmentValue, setFulfillmentValue] = useState(
     () => searchParams.get("fulfillment") || "semua"
   );
+
+  const {
+    data: rows,
+    loading,
+    refreshing,
+    error,
+    refresh,
+  } = useLiveData({
+    getCached: getCachedTransactionList,
+    fetcher: () =>
+      loadTransactionListLive({
+        limit: CACHE_LIMIT,
+        statuses:
+          statusValue === "GAGAL" ? null : statusesForFilter(statusValue),
+      }),
+    isEqual: rowsEqual,
+  });
+
+  const { data: stats, error: statsError } = useLiveData({
+    getCached: getCachedTransactionListStats,
+    fetcher: loadTransactionListStatsLive,
+    isEqual: statsEqual,
+  });
+
+  useEffect(() => {
+    void refresh();
+  }, [statusValue, refresh]);
 
   useEffect(() => {
     if (error) toast.error(error);
@@ -146,16 +188,9 @@ export function TransaksiListPage() {
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return list.filter((row) => {
-      const status = displayStatus(row);
-      if (statusValue !== "semua") {
-        if (statusValue === "GAGAL") {
-          if (!(row.offlinePending && row.status === "GAGAL")) return false;
-        } else if (status !== statusValue) {
-          return false;
-        }
-      }
+      if (!matchesStatusFilter(row, statusValue)) return false;
       if (fulfillmentValue !== "semua") {
-        if (status === "BATAL") return false;
+        if (filterStatus(row) === "BATAL") return false;
         const f = row.fulfillment_status || "MENUNGGU";
         if (f !== fulfillmentValue) return false;
       }
@@ -200,30 +235,40 @@ export function TransaksiListPage() {
     toast.success("CSV berhasil diunduh");
   }
 
+  const emptyHint = searchQuery.trim()
+    ? `Tidak ada transaksi dengan kata kunci "${searchQuery.trim()}"`
+    : statusValue !== "semua" || fulfillmentValue !== "semua"
+      ? "Tidak ada transaksi untuk filter ini. Coba Belum Lunas (DP + menunggu pelunasan) atau Reset."
+      : "Buat transaksi pertama untuk mulai mencatat penjualan.";
+
   const statCards = [
     {
       label: "Total Transaksi",
       value: displayStats.total,
       icon: Receipt,
       className: "text-foreground",
+      filter: "semua" as const,
     },
     {
       label: "Lunas",
       value: displayStats.lunas,
       icon: CheckCircle,
       className: "text-emerald-600 dark:text-emerald-400",
+      filter: "LUNAS" as const,
     },
     {
-      label: "Menunggu",
+      label: "Belum Lunas",
       value: displayStats.menunggu,
       icon: Clock,
       className: "text-amber-600 dark:text-amber-400",
+      filter: "belum_lunas" as const,
     },
     {
       label: "Batal",
       value: displayStats.batal,
       icon: XCircle,
       className: "text-destructive",
+      filter: "BATAL" as const,
     },
   ];
 
@@ -340,22 +385,36 @@ export function TransaksiListPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {statCards.map((stat) => {
           const Icon = stat.icon;
+          const active = statusValue === stat.filter;
           return (
-            <Card key={stat.label} className="shadow-sm">
-              <CardContent className="flex items-center justify-between p-4">
-                <div>
-                  <p className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                    {stat.label}
-                  </p>
-                  <p className={`mt-1 text-xl font-bold ${stat.className}`}>
-                    {stat.value}
-                  </p>
-                </div>
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
-                  <Icon className="h-4 w-4 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
+            <button
+              key={stat.label}
+              type="button"
+              onClick={() => setStatusValue(stat.filter)}
+              className="text-left"
+            >
+              <Card
+                className={`shadow-sm transition-colors ${
+                  active
+                    ? "border-primary ring-1 ring-primary/40"
+                    : "hover:bg-accent/30"
+                }`}
+              >
+                <CardContent className="flex items-center justify-between p-4">
+                  <div>
+                    <p className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                      {stat.label}
+                    </p>
+                    <p className={`mt-1 text-xl font-bold ${stat.className}`}>
+                      {stat.value}
+                    </p>
+                  </div>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10">
+                    <Icon className="h-4 w-4 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
+            </button>
           );
         })}
       </div>
@@ -373,11 +432,7 @@ export function TransaksiListPage() {
                 ? "Transaksi Tidak Ditemukan"
                 : "Belum Ada Transaksi"}
             </h3>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              {searchQuery
-                ? `Tidak ada transaksi dengan kata kunci "${searchQuery}"`
-                : "Buat transaksi pertama untuk mulai mencatat penjualan."}
-            </p>
+            <p className="max-w-sm text-sm text-muted-foreground">{emptyHint}</p>
             {!isFiltered && (
               <Link to="/kasir" className="mt-4">
                 <Button type="button" variant="outline" className="gap-2">

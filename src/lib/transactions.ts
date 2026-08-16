@@ -714,7 +714,64 @@ export async function listRecentTransactions(
   }
 }
 
-/** Count penuh untuk kartu Total/Lunas/Menunggu/Batal (bukan window list). */
+const LIST_SELECT =
+  "id, transaction_number, customer_name, description, final_price, payment_type, dp_amount, status, fulfillment_status, created_at, client_id";
+
+/** List by status (untuk filter chip) — bukan window “semua status”. */
+export async function listTransactionsByStatuses(
+  statuses: string[],
+  limit = 50
+): Promise<ActionState<TransactionRow[]>> {
+  try {
+    if (statuses.length === 0) {
+      return { success: true, data: [] };
+    }
+    let query = supabase
+      .from("transactions")
+      .select(LIST_SELECT)
+      .order("created_at", { ascending: false })
+      .order("transaction_number", { ascending: false })
+      .limit(limit);
+
+    query =
+      statuses.length === 1
+        ? query.eq("status", statuses[0])
+        : query.in("status", statuses);
+
+    const { data, error } = await query;
+    if (error) {
+      return { success: false, message: error.message };
+    }
+    return { success: true, data: (data ?? []) as TransactionRow[] };
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Gagal memuat transaksi",
+    };
+  }
+}
+
+/** client_id pending yang sudah ada di server (hindari double-count stats). */
+export async function findExistingClientIds(
+  clientIds: string[]
+): Promise<Set<string>> {
+  const unique = [...new Set(clientIds.filter(Boolean))];
+  if (unique.length === 0) return new Set();
+  try {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("client_id")
+      .in("client_id", unique);
+    if (error || !data) return new Set();
+    return new Set(
+      data.map((r) => r.client_id).filter((id): id is string => Boolean(id))
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+/** Count penuh untuk kartu Total/Lunas/Belum Lunas/Batal (bukan window list). */
 export interface TransactionListStats {
   total: number;
   lunas: number;

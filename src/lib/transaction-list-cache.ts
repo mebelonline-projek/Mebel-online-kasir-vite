@@ -3,8 +3,10 @@ import type {
   TransactionRow,
 } from "@/lib/transactions";
 import {
+  findExistingClientIds,
   getTransactionStatusCounts,
   listRecentTransactions,
+  listTransactionsByStatuses,
 } from "@/lib/transactions";
 import {
   offlineDb,
@@ -14,7 +16,7 @@ import {
 } from "@/lib/offline-db";
 import { getWibDateString, wibNoonISO } from "@/lib/date-utils";
 
-const CACHE_LIMIT = 50;
+export const CACHE_LIMIT = 50;
 const STATS_CACHE_ID = "transaction-list-stats" as const;
 
 function pendingToRow(item: PendingTransaction): CachedTransactionRow {
@@ -53,7 +55,8 @@ function serverToCached(row: TransactionRow): CachedTransactionRow {
 /** Merge server rows + antrean offline. Pending yang sudah ada di server (client_id) digabung. */
 export function mergeTransactionRows(
   server: TransactionRow[],
-  pending: PendingTransaction[]
+  pending: PendingTransaction[],
+  limit = CACHE_LIMIT
 ): CachedTransactionRow[] {
   const serverClientIds = new Set(
     server.map((r) => r.client_id).filter(Boolean) as string[]
@@ -83,7 +86,7 @@ export function mergeTransactionRows(
       }
       return (b.cachedAt || 0) - (a.cachedAt || 0);
     })
-    .slice(0, CACHE_LIMIT);
+    .slice(0, limit);
 }
 
 export async function getPendingOpen(): Promise<PendingTransaction[]> {
@@ -98,7 +101,11 @@ export async function getPendingOpen(): Promise<PendingTransaction[]> {
 export async function getCachedTransactionList(): Promise<CachedTransactionRow[]> {
   if (!offlineDb) return [];
   const [cached, pending] = await Promise.all([
-    offlineDb.cachedTransactions.orderBy("created_at").reverse().limit(CACHE_LIMIT).toArray(),
+    offlineDb.cachedTransactions
+      .orderBy("created_at")
+      .reverse()
+      .limit(CACHE_LIMIT)
+      .toArray(),
     getPendingOpen(),
   ]);
   const asServer: TransactionRow[] = cached
@@ -126,29 +133,51 @@ export async function saveTransactionListCache(
   });
 }
 
+export type TransactionListLoadOptions = {
+  limit?: number;
+  /** null/undefined = recent semua status; array = filter status server. */
+  statuses?: string[] | null;
+};
+
 /**
- * Fetch network + merge pending + tulis cache.
+ * Fetch network + merge pending + tulis cache (hanya untuk list unfiltered).
  * Multi-device: selalu network saat online; cache hanya percepat UI lokal.
  */
 export async function loadTransactionListLive(
-  limit = CACHE_LIMIT
+  options: number | TransactionListLoadOptions = CACHE_LIMIT
 ): Promise<CachedTransactionRow[]> {
+  const opts: TransactionListLoadOptions =
+    typeof options === "number" ? { limit: options } : options;
+  const limit = opts.limit ?? CACHE_LIMIT;
+  const statuses = opts.statuses ?? null;
+  const filtered = Boolean(statuses && statuses.length > 0);
+
   if (!navigator.onLine) {
-    // Offline: jangan blank — cache device ini + antrean lokal
-    return getCachedTransactionList();
+    const cached = await getCachedTransactionList();
+    if (!filtered) return cached;
+    return cached.filter((row) => statuses!.includes(row.status));
   }
 
   const pending = await getPendingOpen();
-  const result = await listRecentTransactions(limit);
+  const result = filtered
+    ? await listTransactionsByStatuses(statuses!, limit)
+    : await listRecentTransactions(limit);
+
   if (!result.success || !result.data) {
-    // Jaringan gagal → fallback cache + pending (jangan blank)
     const fallback = await getCachedTransactionList();
-    if (fallback.length > 0) return fallback;
+    if (fallback.length > 0) {
+      return filtered
+        ? fallback.filter((row) => statuses!.includes(row.status))
+        : fallback;
+    }
     throw new Error(result.message || "Gagal memuat transaksi");
   }
 
-  await saveTransactionListCache(result.data);
-  return mergeTransactionRows(result.data, pending);
+  // Jangan overwrite cache recent-50 dengan hasil filter status.
+  if (!filtered) {
+    await saveTransactionListCache(result.data);
+  }
+  return mergeTransactionRows(result.data, pending, limit);
 }
 
 function emptyStats(): TransactionListStats {
@@ -169,14 +198,43 @@ function addPendingToStats(
       continue;
     }
     next.total += 1;
-    // Selaras displayStatus list: GAGAL → Batal, selain itu MENYIMPAN → Menunggu
     if (item.status === "failed") {
+      // Gagal sync — bukan BATAL DB; masuk bucket Batal kartu + chip Gagal Sync.
       next.batal += 1;
+    } else if (item.payload.payment_type === "CASH") {
+      next.lunas += 1;
     } else {
       next.menunggu += 1;
     }
   }
   return next;
+}
+
+async function pendingForStats(
+  pending: PendingTransaction[]
+): Promise<PendingTransaction[]> {
+  if (pending.length === 0) return [];
+
+  const cachedClientIds = new Set<string>();
+  if (offlineDb) {
+    const cached = await offlineDb.cachedTransactions.toArray();
+    for (const row of cached) {
+      if (row.client_id) cachedClientIds.add(row.client_id);
+    }
+  }
+
+  const open = pending.filter(
+    (p) =>
+      (p.status === "pending" ||
+        p.status === "syncing" ||
+        p.status === "failed") &&
+      !cachedClientIds.has(p.clientId)
+  );
+
+  if (open.length === 0 || !navigator.onLine) return open;
+
+  const onServer = await findExistingClientIds(open.map((p) => p.clientId));
+  return open.filter((p) => !onServer.has(p.clientId));
 }
 
 function statsFromCachedRows(
@@ -219,16 +277,18 @@ export async function getCachedTransactionListStats(): Promise<TransactionListSt
       .toArray(),
   ]);
 
+  const pendingUnique = await pendingForStats(pending);
+
   if (cached) {
     const { id: _id, cachedAt: _c, ...counts } = cached;
-    return addPendingToStats(counts, pending);
+    return addPendingToStats(counts, pendingUnique);
   }
 
   // Belum pernah fetch count penuh — fallback window cache (bisa undercount).
   const asServer: TransactionRow[] = recent
     .filter((r) => !r.offlinePending)
     .map(({ offlinePending: _o, cachedAt: _c, ...rest }) => rest);
-  return statsFromCachedRows(mergeTransactionRows(asServer, pending));
+  return statsFromCachedRows(mergeTransactionRows(asServer, pendingUnique));
 }
 
 /**
@@ -240,13 +300,35 @@ export async function loadTransactionListStatsLive(): Promise<TransactionListSta
   }
 
   const pending = await getPendingOpen();
+  const pendingUnique = await pendingForStats(pending);
   const result = await getTransactionStatusCounts();
   if (!result.success || !result.data) {
     const fallback = await getCachedTransactionListStats();
-    if (fallback.total > 0 || pending.length > 0) return fallback;
+    if (fallback.total > 0 || pendingUnique.length > 0) return fallback;
     throw new Error(result.message || "Gagal menghitung transaksi");
   }
 
   await saveTransactionListStatsCache(result.data);
-  return addPendingToStats(result.data, pending);
+  return addPendingToStats(result.data, pendingUnique);
+}
+
+/** Map chip filter → status DB (null = semua / recent). */
+export function statusesForFilter(
+  statusValue: string
+): string[] | null {
+  switch (statusValue) {
+    case "semua":
+      return null;
+    case "belum_lunas":
+      return ["DP", "MENUNGGU_PELUNASAN"];
+    case "LUNAS":
+    case "DP":
+    case "MENUNGGU_PELUNASAN":
+    case "BATAL":
+      return [statusValue];
+    case "GAGAL":
+      return null; // lokal saja
+    default:
+      return null;
+  }
 }
