@@ -49,10 +49,7 @@ const STATUS_OPTIONS = [
   { value: "semua", label: "Semua" },
   { value: "LUNAS", label: "Lunas" },
   { value: "belum_lunas", label: "Belum Lunas" },
-  { value: "DP", label: "DP" },
-  { value: "MENUNGGU_PELUNASAN", label: "Menunggu Pelunasan" },
   { value: "BATAL", label: "Batal" },
-  { value: "GAGAL", label: "Gagal Sync" },
 ];
 
 function rowsEqual(a: CachedTransactionRow[], b: CachedTransactionRow[]) {
@@ -97,9 +94,6 @@ function matchesStatusFilter(
   statusValue: string
 ): boolean {
   if (statusValue === "semua") return true;
-  if (statusValue === "GAGAL") {
-    return row.offlinePending === true && row.status === "GAGAL";
-  }
   if (statusValue === "belum_lunas") {
     return (
       filterStatus(row) === "DP" || filterStatus(row) === "MENUNGGU_PELUNASAN"
@@ -114,6 +108,17 @@ function matchesStatusFilter(
   return filterStatus(row) === statusValue;
 }
 
+/** Map filter URL lama (DP / Menunggu Pelunasan / Gagal) ke chip baru. */
+function normalizeStatusFilter(raw: string | null): string {
+  if (!raw || raw === "semua") return "semua";
+  if (raw === "DP" || raw === "MENUNGGU_PELUNASAN" || raw === "belum_lunas") {
+    return "belum_lunas";
+  }
+  if (raw === "GAGAL") return "BATAL";
+  if (raw === "LUNAS" || raw === "BATAL") return raw;
+  return "semua";
+}
+
 export function TransaksiListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -124,7 +129,7 @@ export function TransaksiListPage() {
     () => searchParams.get("q") || ""
   );
   const [statusValue, setStatusValue] = useState(
-    () => searchParams.get("status") || "semua"
+    () => normalizeStatusFilter(searchParams.get("status"))
   );
   const [fulfillmentValue, setFulfillmentValue] = useState(
     () => searchParams.get("fulfillment") || "semua"
@@ -141,8 +146,7 @@ export function TransaksiListPage() {
     fetcher: () =>
       loadTransactionListLive({
         limit: CACHE_LIMIT,
-        statuses:
-          statusValue === "GAGAL" ? null : statusesForFilter(statusValue),
+        statuses: statusesForFilter(statusValue),
       }),
     isEqual: rowsEqual,
   });
@@ -238,7 +242,7 @@ export function TransaksiListPage() {
   const emptyHint = searchQuery.trim()
     ? `Tidak ada transaksi dengan kata kunci "${searchQuery.trim()}"`
     : statusValue !== "semua" || fulfillmentValue !== "semua"
-      ? "Tidak ada transaksi untuk filter ini. Coba Belum Lunas (DP + menunggu pelunasan) atau Reset."
+      ? "Tidak ada transaksi untuk filter ini. Coba Reset."
       : "Buat transaksi pertama untuk mulai mencatat penjualan.";
 
   const statCards = [

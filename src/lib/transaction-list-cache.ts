@@ -322,12 +322,9 @@ export function statusesForFilter(
     case "belum_lunas":
       return ["DP", "MENUNGGU_PELUNASAN"];
     case "LUNAS":
-    case "DP":
-    case "MENUNGGU_PELUNASAN":
+      return ["LUNAS"];
     case "BATAL":
-      return [statusValue];
-    case "GAGAL":
-      return null; // lokal saja
+      return ["BATAL"];
     default:
       return null;
   }
