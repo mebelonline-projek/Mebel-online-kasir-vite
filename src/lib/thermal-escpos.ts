@@ -1,18 +1,36 @@
 /**
- * Thermal ESC/POS nota + Web Serial (Chrome desktop).
+ * Nota thermal: teks ESC/POS (APK Bluetooth & Web Serial), raster (cadangan
+ * untuk printer yang tidak mencetak teks), dan PNG (bagikan ke Thermer dari
+ * browser HP).
  *
- * Banyak POS-58 murah mencetak kertas kosong untuk teks ESC/POS / dialog Windows.
- * Default: raster monochrome (GS v 0) — hampir selalu keluar teks.
+ * Satu sumber baris (`buildThermalNotaLines`) dipakai ketiganya, supaya isi
+ * nota identik apa pun jalurnya.
  */
 
 import type { InvoiceLineItem } from "@/components/invoice/invoice-document";
 import { formatCurrency, formatDate } from "@/lib/formatters";
+import { saveBlob, type SaveFileResult } from "@/lib/save-file";
+
+/** Lebar kertas printer thermal. */
+export type ThermalPaperWidth = "58" | "80";
+
+/** Karakter per baris Font A (12×24 dot). */
+export const THERMAL_COLS_BY_WIDTH: Record<ThermalPaperWidth, number> = {
+  "58": 32,
+  "80": 48,
+};
+
+/** Dot horizontal kepala cetak @ ~203dpi (kelipatan 8). */
+export const THERMAL_DOTS_BY_WIDTH: Record<ThermalPaperWidth, number> = {
+  "58": 384,
+  "80": 576,
+};
 
 /** Lebar karakter Font A pada roll 58mm. */
-export const THERMAL_COLS = 32;
+export const THERMAL_COLS = THERMAL_COLS_BY_WIDTH["58"];
 
 /** Dot horizontal 58mm @ ~203dpi. Harus kelipatan 8. */
-export const THERMAL_DOT_WIDTH = 384;
+export const THERMAL_DOT_WIDTH = THERMAL_DOTS_BY_WIDTH["58"];
 
 /**
  * Lebar PNG untuk share/unduh ke Thermer POS-58.
@@ -52,18 +70,10 @@ export interface ThermalNotaInput {
 
 const ESC = 0x1b;
 const GS = 0x1d;
+const LF = 0x0a;
 
-function encodeAscii(text: string): Uint8Array {
-  const normalized = text
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\x20-\x7E\n]/g, "?");
-  const out = new Uint8Array(normalized.length);
-  for (let i = 0; i < normalized.length; i++) {
-    out[i] = normalized.charCodeAt(i) & 0xff;
-  }
-  return out;
-}
+/** Baris raster per perintah GS v 0 — printer murah punya buffer kecil. */
+const RASTER_BAND_ROWS = 128;
 
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
   const total = chunks.reduce((n, c) => n + c.length, 0);
@@ -76,48 +86,81 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-function line(text: string): Uint8Array {
-  return encodeAscii(`${text}\n`);
-}
-
-function dashLine(cols = THERMAL_COLS): string {
-  return "-".repeat(cols);
-}
-
-function pairLine(left: string, right: string, cols = THERMAL_COLS): string {
-  const r = right.slice(0, cols);
-  const maxLeft = Math.max(0, cols - r.length - 1);
-  const l = left.slice(0, maxLeft);
-  const gap = Math.max(1, cols - l.length - r.length);
-  return `${l}${" ".repeat(gap)}${r}`;
-}
-
 function money(n: number): string {
-  return formatCurrency(n).replace(/\u00a0/g, " ");
+  return asciiSafe(formatCurrency(n));
 }
 
-function wrapText(text: string, cols: number): string[] {
-  const words = text.trim().split(/\s+/);
-  const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (next.length <= cols) {
-      current = next;
-    } else {
-      if (current) lines.push(current);
-      current = word.slice(0, cols);
-    }
+/** Tanda baca Unicode umum → padanan ASCII (sebelum sisa non-ASCII jadi "?"). */
+const ASCII_REPLACEMENTS: Array<[RegExp, string]> = [
+  [/[     ]/g, " "],
+  [/[‐-―−]/g, "-"],
+  [/[‘’‚′]/g, "'"],
+  [/[“”„″]/g, '"'],
+  [/…/g, "..."],
+  [/[•·]/g, "-"],
+  [/×/g, "x"],
+  [/[\t\r]/g, " "],
+];
+
+/**
+ * Printer thermal murah memakai code page 1-byte, bukan UTF-8 — semua teks
+ * diturunkan ke ASCII cetak supaya tidak muncul karakter sampah.
+ */
+function asciiSafe(text: string): string {
+  let out = text;
+  for (const [pattern, replacement] of ASCII_REPLACEMENTS) {
+    out = out.replace(pattern, replacement);
   }
-  if (current) lines.push(current);
+  return out
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^\x20-\x7E\n]/g, "?");
+}
+
+/** Bungkus per kata; kata yang lebih panjang dari satu baris dipecah, bukan dipotong. */
+function wrapText(text: string, cols: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    let current = "";
+    for (let word of words) {
+      while (word.length > cols) {
+        if (current) {
+          lines.push(current);
+          current = "";
+        }
+        lines.push(word.slice(0, cols));
+        word = word.slice(cols);
+      }
+      if (!word) continue;
+      const next = current ? `${current} ${word}` : word;
+      if (next.length <= cols) {
+        current = next;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    }
+    if (current) lines.push(current);
+  }
   return lines.length > 0 ? lines : [""];
 }
 
-function asciiSafe(text: string): string {
-  return text
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\x20-\x7E]/g, "?");
+/**
+ * Kiri-kanan dalam satu baris; kalau tidak muat, teks kiri dibungkus dan
+ * nominal kanan turun ke baris sendiri (rata kanan) — nominal tidak pernah
+ * terpotong.
+ */
+function pairLines(left: string, right: string, cols: number): string[] {
+  const r = right.slice(0, cols);
+  if (left.length + 1 + r.length <= cols) {
+    return [`${left}${" ".repeat(cols - left.length - r.length)}${r}`];
+  }
+  const indent = left.match(/^ */)?.[0] ?? "";
+  const body = wrapText(left, Math.max(cols - indent.length, 1)).map(
+    (part) => `${indent}${part}`,
+  );
+  return [...body, r.padStart(cols)];
 }
 
 export type ThermalLineAlign = "center" | "left";
@@ -125,50 +168,70 @@ export type ThermalLineAlign = "center" | "left";
 export interface ThermalLine {
   text: string;
   align: ThermalLineAlign;
-  /** Header toko / judul — sedikit lebih tegas di raster */
-  emphasis?: "title" | "strong" | "normal";
+  /**
+   * title  = huruf ganda (lebar & tinggi) + tebal — nama toko.
+   * total  = tinggi ganda + tebal — total tagihan / sisa.
+   * strong = tebal.
+   */
+  emphasis?: "title" | "total" | "strong" | "normal";
 }
 
-/** Baris nota tanpa pad spasi (center pakai ESC a / canvas textAlign). */
-export function buildThermalNotaLines(data: ThermalNotaInput): ThermalLine[] {
+/** Baris nota tanpa pad spasi untuk teks tengah (center pakai ESC a / canvas textAlign). */
+export function buildThermalNotaLines(
+  data: ThermalNotaInput,
+  cols: number = THERMAL_COLS,
+): ThermalLine[] {
   const lines: ThermalLine[] = [];
   const add = (
     text: string,
     align: ThermalLineAlign = "left",
     emphasis: ThermalLine["emphasis"] = "normal",
   ) => {
-    lines.push({
-      text: asciiSafe(text).slice(0, THERMAL_COLS),
-      align,
-      emphasis,
+    lines.push({ text, align, emphasis });
+  };
+  const addWrapped = (
+    text: string,
+    align: ThermalLineAlign = "left",
+    emphasis: ThermalLine["emphasis"] = "normal",
+    width = cols,
+  ) => {
+    for (const part of wrapText(asciiSafe(text), width)) add(part, align, emphasis);
+  };
+  const addPair = (
+    left: string,
+    right: string,
+    emphasis: ThermalLine["emphasis"] = "normal",
+  ) => {
+    for (const part of pairLines(asciiSafe(left), asciiSafe(right), cols)) {
+      add(part, "left", emphasis);
+    }
+  };
+  /** "Pel : nilai" — baris lanjutan menjorok sejajar nilai. */
+  const addLabeled = (label: string, value: string) => {
+    const indent = " ".repeat(label.length);
+    wrapText(asciiSafe(value), cols - label.length).forEach((part, i) => {
+      add(`${i === 0 ? label : indent}${part}`);
     });
   };
+  const separator = () => add("-".repeat(cols));
 
-  add(data.store_name, "center", "title");
-  if (data.store_address) {
-    for (const part of wrapText(data.store_address, THERMAL_COLS)) {
-      add(part, "center", "normal");
-    }
-  }
-  if (data.store_phone) add(`Telp: ${data.store_phone}`, "center", "normal");
-  add(dashLine(), "left");
+  // Huruf ganda memakai 2 kolom per karakter.
+  addWrapped(data.store_name, "center", "title", Math.floor(cols / 2));
+  if (data.store_address) addWrapped(data.store_address, "center");
+  if (data.store_phone) addWrapped(`Telp: ${data.store_phone}`, "center");
+  separator();
   add("NOTA PEMBAYARAN", "center", "strong");
-  add(data.transaction_number, "center", "normal");
-  add(dashLine(), "left");
-  add(`Tgl : ${formatDate(data.created_at)}`, "left");
-  add(`Pel : ${data.customer_name}`, "left");
-  add(
-    `Tipe: ${data.payment_type === "CASH" ? "Cash Lunas" : "DP / UM"}`,
-    "left",
-  );
+  addWrapped(data.transaction_number, "center");
+  separator();
+  addLabeled("Tgl : ", formatDate(data.created_at));
+  addLabeled("Pel : ", data.customer_name);
+  addLabeled("Tipe: ", data.payment_type === "CASH" ? "Cash Lunas" : "DP / UM");
   if (data.description?.trim()) {
-    add(dashLine(), "left");
+    separator();
     add("Catatan:", "left", "strong");
-    for (const part of wrapText(data.description.trim(), THERMAL_COLS)) {
-      add(part, "left");
-    }
+    addWrapped(data.description.trim());
   }
-  add(dashLine(), "left");
+  separator();
 
   const totalPaid = data.payments.reduce((s, p) => s + p.amount, 0);
   const charges = data.customerCharges || [];
@@ -178,120 +241,182 @@ export function buildThermalNotaLines(data: ThermalNotaInput): ThermalLine[] {
   const remaining = totalDue - totalPaid;
 
   for (const item of data.lineItems) {
-    add(item.product_name, "left");
-    if (item.note) add(`  ${item.note}`, "left");
-    add(
-      pairLine(
-        `  ${item.quantity} x ${money(item.unit_price)}`,
-        money(item.line_total),
-      ),
-      "left",
+    addWrapped(item.product_name, "left", "strong");
+    if (item.note?.trim()) {
+      for (const part of wrapText(asciiSafe(item.note.trim()), cols - 2)) {
+        add(`  ${part}`);
+      }
+    }
+    addPair(
+      `  ${item.quantity} x ${money(item.unit_price)}`,
+      money(item.line_total),
     );
   }
 
   if (charges.length > 0) {
-    add(dashLine(), "left");
-    for (const c of charges) {
-      add(pairLine(c.name.slice(0, 18), money(c.amount)), "left");
-    }
+    separator();
+    for (const c of charges) addPair(c.name, money(c.amount));
   }
 
-  add(dashLine(), "left");
-  add(pairLine("Total tagihan", money(totalDue)), "left", "strong");
+  separator();
+  addPair("Total tagihan", money(totalDue), "total");
   if (data.payment_type === "DP") {
-    add(pairLine("DP awal", money(data.dp_amount)), "left");
+    addPair("DP awal", money(data.dp_amount));
   }
-  add(pairLine("Dibayar", money(totalPaid)), "left");
+  addPair("Dibayar", money(totalPaid));
   if (remaining > 0) {
-    add(pairLine("Sisa", money(remaining)), "left", "strong");
+    addPair("Sisa", money(remaining), "total");
   } else if (data.payment_type !== "CASH") {
     add("*** LUNAS ***", "center", "strong");
   }
 
   if (data.payments.length > 0) {
-    add(dashLine(), "left");
-    add("Riwayat bayar:", "left");
+    separator();
+    add("Riwayat bayar:");
     for (const p of data.payments) {
-      add(
-        pairLine(
-          `${formatDate(p.payment_date)} ${p.method}`.slice(0, 18),
-          money(p.amount),
-        ),
-        "left",
-      );
+      addPair(`${formatDate(p.payment_date)} ${p.method}`, money(p.amount));
     }
   }
 
-  add(dashLine(), "left");
-  add("Terima kasih!", "center", "normal");
-  add(data.status, "center", "normal");
+  separator();
+  add("Terima kasih!", "center");
+  addWrapped(data.status, "center");
   return lines;
 }
 
-/** Mode teks ESC/POS — center via ESC a, bukan spasi. */
-export function buildThermalNotaEscPos(data: ThermalNotaInput): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  const push = (b: Uint8Array) => chunks.push(b);
+/** Cara kirim ke printer: teks ESC/POS (bawaan) atau gambar raster (cadangan). */
+export type ThermalPrintMode = "text" | "image";
 
-  push(new Uint8Array([ESC, 0x40])); // init
-  push(new Uint8Array([ESC, 0x74, 0x00])); // PC437
-  push(new Uint8Array([ESC, 0x33, 20])); // line spacing
+/** Baris tes cetak: garis penggaris selebar kertas untuk cek lebar kertas. */
+export function buildThermalTestLines(
+  paper: ThermalPaperWidth,
+  mode: ThermalPrintMode,
+): ThermalLine[] {
+  const cols = THERMAL_COLS_BY_WIDTH[paper];
+  const ruler = Array.from({ length: cols }, (_, i) => String((i + 1) % 10)).join("");
+  return [
+    { text: "TES PRINTER", align: "center", emphasis: "title" },
+    { text: `Kertas ${paper}mm - mode ${mode === "text" ? "teks" : "gambar"}`, align: "center" },
+    { text: "-".repeat(cols), align: "left" },
+    { text: "Penggaris harus pas 1 baris:", align: "left" },
+    { text: ruler, align: "left" },
+    ...pairLines("Total tagihan", "Rp 1.250.000", cols).map(
+      (text): ThermalLine => ({ text, align: "left", emphasis: "total" }),
+    ),
+    { text: "-".repeat(cols), align: "left" },
+    { text: "Huruf tebal & normal terbaca?", align: "left", emphasis: "strong" },
+    { text: "Kalau ya, printer siap dipakai.", align: "left" },
+  ];
+}
 
-  let align: ThermalLineAlign = "left";
-  const setAlign = (next: ThermalLineAlign) => {
-    if (next === align) return;
-    align = next;
-    push(new Uint8Array([ESC, 0x61, next === "center" ? 0x01 : 0x00]));
-  };
+/** Kirim baris ke printer sesuai mode. */
+export function buildThermalPayload(
+  rows: ThermalLine[],
+  paper: ThermalPaperWidth,
+  mode: ThermalPrintMode,
+): Uint8Array {
+  return mode === "image"
+    ? renderLinesRaster(rows, paper)
+    : renderLinesEscPos(rows);
+}
 
-  for (const row of buildThermalNotaLines(data)) {
-    setAlign(row.align);
-    if (row.emphasis === "title" || row.emphasis === "strong") {
-      push(new Uint8Array([ESC, 0x45, 0x01]));
-      push(line(row.text));
-      push(new Uint8Array([ESC, 0x45, 0x00]));
-    } else {
-      push(line(row.text));
-    }
+/** Nota siap kirim ke printer (Bluetooth APK). */
+export function buildThermalNotaPayload(
+  data: ThermalNotaInput,
+  paper: ThermalPaperWidth,
+  mode: ThermalPrintMode,
+): Uint8Array {
+  return buildThermalPayload(
+    buildThermalNotaLines(data, THERMAL_COLS_BY_WIDTH[paper]),
+    paper,
+    mode,
+  );
+}
+
+/**
+ * Teks ESC/POS — tajam (font bawaan printer) dan cepat. Tengah via ESC a,
+ * huruf besar via GS !, tebal via ESC E.
+ */
+export function buildThermalNotaEscPos(
+  data: ThermalNotaInput,
+  paper: ThermalPaperWidth = "58",
+): Uint8Array {
+  return renderLinesEscPos(
+    buildThermalNotaLines(data, THERMAL_COLS_BY_WIDTH[paper]),
+  );
+}
+
+function renderLinesEscPos(rows: ThermalLine[]): Uint8Array {
+  const chunks: Uint8Array[] = [
+    new Uint8Array([ESC, 0x40]), // init
+    new Uint8Array([ESC, 0x74, 0x00]), // code page PC437
+    new Uint8Array([ESC, 0x32]), // jarak baris bawaan
+  ];
+
+  for (const row of rows) {
+    const size =
+      row.emphasis === "title" ? 0x11 : row.emphasis === "total" ? 0x01 : 0x00;
+    const bold = row.emphasis && row.emphasis !== "normal" ? 0x01 : 0x00;
+    chunks.push(
+      new Uint8Array([
+        ESC, 0x61, row.align === "center" ? 0x01 : 0x00,
+        GS, 0x21, size,
+        ESC, 0x45, bold,
+      ]),
+    );
+    const text = asciiSafe(row.text);
+    const bytes = new Uint8Array(text.length + 1);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
+    bytes[text.length] = LF;
+    chunks.push(bytes);
   }
 
-  setAlign("left");
-  push(new Uint8Array([ESC, 0x64, 0x04]));
-  push(new Uint8Array([GS, 0x56, 0x01]));
+  chunks.push(
+    new Uint8Array([ESC, 0x61, 0x00, GS, 0x21, 0x00, ESC, 0x45, 0x00]),
+    new Uint8Array([ESC, 0x64, 0x04]), // dorong kertas melewati pisau sobek
+    new Uint8Array([GS, 0x56, 0x01]), // potong (diabaikan printer tanpa pisau)
+  );
   return concatBytes(chunks);
 }
 
 /**
- * Gambar nota ke canvas.
- * forShare: font memenuhi lebar 384 (POS-58). Jangan 576 — Thermer potong kanan.
+ * Gambar nota ke canvas monospace — kolom sama persis dengan mode teks.
+ * forShare: margin untuk Thermer (PNG 384, jangan 576 — Thermer potong kanan).
  */
-function drawThermalNotaCanvas(
-  data: ThermalNotaInput,
-  opts?: { width?: number; forShare?: boolean },
+function drawThermalCanvas(
+  rows: ThermalLine[],
+  opts: { width: number; cols: number; forShare?: boolean },
 ): HTMLCanvasElement | null {
   if (typeof document === "undefined") return null;
 
-  const rows = buildThermalNotaLines(data);
-  const forShare = opts?.forShare === true;
-  const width =
-    opts?.width ?? (forShare ? THERMAL_SHARE_PNG_WIDTH : THERMAL_DOT_WIDTH);
-  const marginLeft = forShare ? 8 : 12;
-  const marginRight = forShare ? 16 : 12;
+  const { width, cols } = opts;
+  const marginLeft = opts.forShare ? 8 : 4;
+  const marginRight = opts.forShare ? 16 : 4;
   const usable = Math.max(width - marginLeft - marginRight, 64);
-  const bodyPx = Math.max(13, Math.floor(usable / (THERMAL_COLS * 0.6)));
-  const strongPx = bodyPx + 2;
-  const titlePx = bodyPx + 3;
-  const lineHeight = Math.round(bodyPx * 1.48);
-  const padY = Math.round(bodyPx * 0.4);
-  const height = Math.max(lineHeight * rows.length + padY * 2, 40);
-  const centerX = Math.floor(width / 2);
 
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
 
+  // Ukuran font dihitung dari lebar nyata `cols` karakter monospace, supaya
+  // baris kiri-kanan (yang sudah dipad spasi) pas selebar kertas.
+  const probePx = 20;
+  ctx.font = `${probePx}px monospace`;
+  const probeWidth = ctx.measureText("M".repeat(cols)).width || cols * 12;
+  const bodyPx = Math.max(10, Math.floor((probePx * usable) / probeWidth));
+  const lineHeight = Math.round(bodyPx * 1.35);
+  const padY = Math.round(bodyPx * 0.5);
+  const rowHeight = (row: ThermalLine) =>
+    row.emphasis === "title" || row.emphasis === "total"
+      ? lineHeight * 2
+      : lineHeight;
+  const height = Math.max(
+    rows.reduce((sum, row) => sum + rowHeight(row), 0) + padY * 2,
+    40,
+  );
+
+  canvas.width = width;
+  canvas.height = height;
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = "#000000";
@@ -299,88 +424,100 @@ function drawThermalNotaCanvas(
 
   let y = padY;
   for (const row of rows) {
+    const h = rowHeight(row);
+    const weight = row.emphasis && row.emphasis !== "normal" ? "bold " : "";
+    const x = row.align === "center" ? marginLeft + usable / 2 : marginLeft;
+    ctx.textAlign = row.align === "center" ? "center" : "left";
+    ctx.save();
     if (row.emphasis === "title") {
-      ctx.font = `bold ${titlePx}px monospace`;
-    } else if (row.emphasis === "strong") {
-      ctx.font = `bold ${strongPx}px monospace`;
+      ctx.font = `${weight}${bodyPx * 2}px monospace`;
+      ctx.fillText(row.text, x, y, usable);
+    } else if (row.emphasis === "total") {
+      // Tinggi ganda, lebar normal — sama seperti GS ! 0x01.
+      ctx.font = `${weight}${bodyPx}px monospace`;
+      ctx.translate(0, y);
+      ctx.scale(1, 2);
+      ctx.fillText(row.text, x, 0, usable);
     } else {
-      ctx.font = `${bodyPx}px monospace`;
+      ctx.font = `${weight}${bodyPx}px monospace`;
+      ctx.fillText(row.text, x, y, usable);
     }
-
-    if (row.align === "center") {
-      ctx.textAlign = "center";
-      ctx.fillText(row.text, centerX, y, usable);
-    } else {
-      const sep = row.text.match(/^(.*?)(\s{2,})(\S.*)$/);
-      if (sep) {
-        const left = sep[1] ?? "";
-        const right = sep[3] ?? "";
-        const rightW = ctx.measureText(right).width;
-        const gap = Math.max(6, Math.floor(bodyPx * 0.35));
-        const leftMax = Math.max(32, usable - rightW - gap);
-        ctx.textAlign = "left";
-        ctx.fillText(left, marginLeft, y, leftMax);
-        ctx.textAlign = "right";
-        ctx.fillText(right, width - marginRight, y);
-      } else {
-        ctx.textAlign = "left";
-        ctx.fillText(row.text, marginLeft, y, usable);
-      }
-    }
-    y += lineHeight;
+    ctx.restore();
+    y += h;
   }
 
   return canvas;
 }
 
+/**
+ * Raster monokrom (GS v 0) — cadangan untuk printer yang mencetak kertas
+ * kosong / huruf aneh pada mode teks. Dikirim per pita supaya buffer printer
+ * murah tidak meluap.
+ */
 export function buildThermalNotaRasterEscPos(
   data: ThermalNotaInput,
+  paper: ThermalPaperWidth = "58",
 ): Uint8Array {
-  const canvas = drawThermalNotaCanvas(data, { width: THERMAL_DOT_WIDTH });
-  if (!canvas) return buildThermalNotaEscPos(data);
+  return renderLinesRaster(
+    buildThermalNotaLines(data, THERMAL_COLS_BY_WIDTH[paper]),
+    paper,
+  );
+}
 
-  const width = canvas.width;
+function renderLinesRaster(
+  rows: ThermalLine[],
+  paper: ThermalPaperWidth,
+): Uint8Array {
+  const width = THERMAL_DOTS_BY_WIDTH[paper];
+  const canvas = drawThermalCanvas(rows, {
+    width,
+    cols: THERMAL_COLS_BY_WIDTH[paper],
+  });
+  const ctx = canvas?.getContext("2d");
+  if (!canvas || !ctx) throw new Error("Gagal menggambar nota");
+
   const height = canvas.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return buildThermalNotaEscPos(data);
-
   const image = ctx.getImageData(0, 0, width, height);
   const bytesPerRow = width / 8;
-  const raster = new Uint8Array(bytesPerRow * height);
+  const chunks: Uint8Array[] = [new Uint8Array([ESC, 0x40])];
 
-  for (let row = 0; row < height; row++) {
-    for (let col = 0; col < width; col++) {
-      const i = (row * width + col) * 4;
-      const lum =
-        image.data[i]! * 0.299 +
-        image.data[i + 1]! * 0.587 +
-        image.data[i + 2]! * 0.114;
-      if (lum < 128) {
-        const byteIndex = row * bytesPerRow + (col >> 3);
-        raster[byteIndex] |= 0x80 >> (col & 7);
+  for (let top = 0; top < height; top += RASTER_BAND_ROWS) {
+    const bandRows = Math.min(RASTER_BAND_ROWS, height - top);
+    const band = new Uint8Array(bytesPerRow * bandRows);
+    for (let row = 0; row < bandRows; row++) {
+      for (let col = 0; col < width; col++) {
+        const i = ((top + row) * width + col) * 4;
+        const lum =
+          image.data[i]! * 0.299 +
+          image.data[i + 1]! * 0.587 +
+          image.data[i + 2]! * 0.114;
+        if (lum < 128) band[row * bytesPerRow + (col >> 3)] |= 0x80 >> (col & 7);
       }
     }
+    chunks.push(
+      new Uint8Array([
+        GS, 0x76, 0x30, 0x00,
+        bytesPerRow & 0xff, (bytesPerRow >> 8) & 0xff,
+        bandRows & 0xff, (bandRows >> 8) & 0xff,
+      ]),
+      band,
+    );
   }
 
-  const xL = bytesPerRow & 0xff;
-  const xH = (bytesPerRow >> 8) & 0xff;
-  const yL = height & 0xff;
-  const yH = (height >> 8) & 0xff;
-
-  return concatBytes([
-    new Uint8Array([ESC, 0x40]),
-    new Uint8Array([GS, 0x76, 0x30, 0x00, xL, xH, yL, yH]),
-    raster,
+  chunks.push(
     new Uint8Array([ESC, 0x64, 0x04]),
-  ]);
+    new Uint8Array([GS, 0x56, 0x01]),
+  );
+  return concatBytes(chunks);
 }
 
 /** PNG 384px (lebar POS-58) — jangan 576 agar Thermer tidak potong kanan. */
 export async function renderThermalNotaPngBlob(
   data: ThermalNotaInput,
 ): Promise<Blob> {
-  const canvas = drawThermalNotaCanvas(data, {
+  const canvas = drawThermalCanvas(buildThermalNotaLines(data, THERMAL_COLS), {
     width: THERMAL_SHARE_PNG_WIDTH,
+    cols: THERMAL_COLS,
     forShare: true,
   });
   if (!canvas) throw new Error("Gagal membuat gambar nota");
@@ -396,15 +533,11 @@ export async function renderThermalNotaPngBlob(
   });
 }
 
-export function downloadBlobFile(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+export function downloadBlobFile(
+  blob: Blob,
+  filename: string,
+): Promise<SaveFileResult> {
+  return saveBlob(blob, filename);
 }
 
 /**
@@ -440,7 +573,7 @@ export async function shareOrDownloadThermalPng(
     }
   }
 
-  downloadBlobFile(blob, filename);
+  await downloadBlobFile(blob, filename);
   return "downloaded";
 }
 

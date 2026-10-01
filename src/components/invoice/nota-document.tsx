@@ -1,10 +1,26 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Download, Printer, Usb } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  Loader2,
+  Printer,
+  Settings2,
+  Usb,
+} from "lucide-react";
 import { toast } from "sonner";
 import type { InvoiceLineItem } from "@/components/invoice/invoice-document";
+import { PrinterSettingsDialog } from "@/components/invoice/printer-settings-dialog";
 import { StoreLogo } from "@/components/shared/store-logo";
 import { Button } from "@/components/ui/button";
+import {
+  isNativeAndroid,
+  printBytes,
+  PrinterError,
+  printerErrorMessage,
+  readPrinterSettings,
+  type PrinterSettings,
+} from "@/lib/bluetooth-printer";
 import { formatCurrency, formatDate } from "@/lib/formatters";
 import { buildNotaPdfData, resolveNotaCatatan } from "@/lib/pdf-invoice";
 import { printNotaHtml } from "@/lib/print-nota-html";
@@ -15,6 +31,7 @@ import {
 } from "@/lib/print-nota-pdf";
 import {
   buildThermalNotaEscPos,
+  buildThermalNotaPayload,
   downloadBlobFile,
   isAndroidClient,
   isWebSerialSupported,
@@ -80,6 +97,11 @@ export function NotaDocument({
   const [serialOk, setSerialOk] = useState(false);
   const [mobileClient, setMobileClient] = useState(false);
   const [androidClient, setAndroidClient] = useState(false);
+  // APK Android: cetak langsung ke printer Bluetooth (tanpa Thermer/PNG).
+  const [nativeApp] = useState(isNativeAndroid);
+  const [printerSettings, setPrinterSettings] =
+    useState<PrinterSettings>(readPrinterSettings);
+  const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
 
   useEffect(() => {
     setSerialOk(isWebSerialSupported());
@@ -100,8 +122,8 @@ export function NotaDocument({
       const pdfData = await buildNotaPdfData(transaction_id);
       if (!pdfData) throw new Error("Gagal menyiapkan data PDF");
       const blob = await renderNotaPdfBlob(pdfData);
-      downloadBlob(blob, `NOTA-${transaction_number}.pdf`);
-      toast.success("Nota berhasil disimpan sebagai PDF");
+      const result = await downloadBlob(blob, `NOTA-${transaction_number}.pdf`);
+      if (result === "saved") toast.success("Nota berhasil disimpan sebagai PDF");
     } catch {
       toast.error("Gagal menyimpan nota sebagai PDF");
     } finally {
@@ -128,6 +150,31 @@ export function NotaDocument({
   });
 
   const buildEscPosPayload = () => buildThermalNotaEscPos(buildThermalInput());
+
+  /** APK: kirim nota langsung ke printer Bluetooth tersimpan. */
+  const handleBluetoothPrint = async () => {
+    const current = readPrinterSettings();
+    setPrinterSettings(current);
+    if (!current.address) {
+      toast.message("Pilih printer dulu, lalu ketuk Cetak Nota lagi.");
+      setPrinterDialogOpen(true);
+      return;
+    }
+    setPrintingThermal(true);
+    try {
+      await printBytes(
+        buildThermalNotaPayload(buildThermalInput(), current.paper, current.mode),
+      );
+      toast.success("Nota dikirim ke printer");
+    } catch (err) {
+      if (err instanceof PrinterError && err.code === "NO_PRINTER") {
+        setPrinterDialogOpen(true);
+      }
+      toast.error(printerErrorMessage(err), { duration: 9000 });
+    } finally {
+      setPrintingThermal(false);
+    }
+  };
 
   /** Dialog sistem — di Android sering "layanan cetak dinonaktifkan". */
   const handlePrintNota = () => {
@@ -217,8 +264,10 @@ export function NotaDocument({
     setSavingPdf(true);
     try {
       const blob = await renderThermalNotaPngBlob(buildThermalInput());
-      downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
-      toast.success("Gambar nota diunduh. Buka di Thermer untuk cetak.");
+      const result = await downloadBlobFile(blob, `NOTA-${transaction_number}.png`);
+      if (result === "saved") {
+        toast.success("Gambar nota diunduh. Buka di Thermer untuk cetak.");
+      }
     } catch {
       toast.error("Gagal mengunduh gambar nota");
     } finally {
@@ -243,44 +292,16 @@ export function NotaDocument({
           <ArrowLeft className="h-3.5 w-3.5" />
           Kembali
         </Button>
-        {(serialOk || isPhone) && (
-          <Button
-            size="sm"
-            onClick={() => void handleThermalPrint()}
-            disabled={printingThermal}
-            className="gap-1"
-            title={
-              isPhone
-                ? "Bagikan ke Thermer / app printer"
-                : "ESC/POS via USB/COM"
-            }
-          >
-            <Usb className="h-3.5 w-3.5" />
-            {printingThermal ? "Menyiapkan..." : "Cetak Thermal"}
-          </Button>
-        )}
-        {isPhone ? (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void handleDownloadGambar()}
-            disabled={savingPdf}
-            className="gap-1"
-            title="Unduh PNG untuk dibuka di Thermer"
-          >
-            <Download className="h-3.5 w-3.5" />
-            {savingPdf ? "Menyiapkan..." : "Unduh Gambar"}
-          </Button>
-        ) : (
+        {nativeApp ? (
           <>
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handlePrintNota()}
+              onClick={() => setPrinterDialogOpen(true)}
               className="gap-1"
             >
-              <Printer className="h-3.5 w-3.5" />
-              Cetak Sistem
+              <Settings2 className="h-3.5 w-3.5" />
+              Atur Printer
             </Button>
             <Button
               size="sm"
@@ -288,15 +309,98 @@ export function NotaDocument({
               onClick={() => void handleSavePdf()}
               disabled={savingPdf}
               className="gap-1"
+              title="Bagikan PDF (WhatsApp, simpan ke Files, dll)"
             >
               <Download className="h-3.5 w-3.5" />
-              {savingPdf ? "Menyimpan..." : "Simpan PDF"}
+              {savingPdf ? "Menyiapkan..." : "PDF"}
             </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleBluetoothPrint()}
+              disabled={printingThermal}
+              className="gap-1"
+            >
+              {printingThermal ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Printer className="h-3.5 w-3.5" />
+              )}
+              {printingThermal ? "Mencetak..." : "Cetak Nota"}
+            </Button>
+          </>
+        ) : (
+          <>
+            {(serialOk || isPhone) && (
+              <Button
+                size="sm"
+                onClick={() => void handleThermalPrint()}
+                disabled={printingThermal}
+                className="gap-1"
+                title={
+                  isPhone
+                    ? "Bagikan ke Thermer / app printer"
+                    : "ESC/POS via USB/COM"
+                }
+              >
+                <Usb className="h-3.5 w-3.5" />
+                {printingThermal ? "Menyiapkan..." : "Cetak Thermal"}
+              </Button>
+            )}
+            {isPhone ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void handleDownloadGambar()}
+                disabled={savingPdf}
+                className="gap-1"
+                title="Unduh PNG untuk dibuka di Thermer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                {savingPdf ? "Menyiapkan..." : "Unduh Gambar"}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handlePrintNota()}
+                  className="gap-1"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Cetak Sistem
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleSavePdf()}
+                  disabled={savingPdf}
+                  className="gap-1"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {savingPdf ? "Menyimpan..." : "Simpan PDF"}
+                </Button>
+              </>
+            )}
           </>
         )}
       </div>
       <p className="mb-4 text-center text-xs text-muted-foreground">
-        {isPhone ? (
+        {nativeApp ? (
+          printerSettings.address ? (
+            <>
+              Printer:{" "}
+              <span className="font-medium">
+                {printerSettings.name || printerSettings.address}
+              </span>{" "}
+              · kertas {printerSettings.paper}mm
+            </>
+          ) : (
+            <>
+              Printer belum dipilih — ketuk{" "}
+              <span className="font-medium">Atur Printer</span>.
+            </>
+          )
+        ) : isPhone ? (
           <>
             HP: <span className="font-medium">Cetak Thermal</span> (bagikan) atau{" "}
             <span className="font-medium">Unduh Gambar</span>, lalu buka di
@@ -533,6 +637,14 @@ export function NotaDocument({
           <p className="mt-1 text-[10px]">{status}</p>
         </div>
       </div>
+
+      {nativeApp && (
+        <PrinterSettingsDialog
+          open={printerDialogOpen}
+          onOpenChange={setPrinterDialogOpen}
+          onChanged={setPrinterSettings}
+        />
+      )}
 
       <style>{`
         @media print {
