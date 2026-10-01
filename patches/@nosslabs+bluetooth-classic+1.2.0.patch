@@ -1,0 +1,123 @@
+diff --git a/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassic.java b/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassic.java
+index c26ef1c..34eed9d 100644
+--- a/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassic.java
++++ b/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassic.java
+@@ -64,6 +64,12 @@ public class BluetoothClassic {
+         }
+         adapter.cancelDiscovery();
+         discoveredDevices.clear();
++        // Patch: printer yang sudah di-pairing sering tidak "discoverable"
++        // lagi, jadi selalu ikut sertakan daftar pairing HP.
++        Set<BluetoothDevice> bonded = adapter.getBondedDevices();
++        if (bonded != null) {
++            discoveredDevices.addAll(bonded);
++        }
+ 
+         IntentFilter intentFilter = new IntentFilter(BluetoothDevice.ACTION_FOUND);
+         context.registerReceiver(
+@@ -102,6 +108,20 @@ public class BluetoothClassic {
+         return result;
+     }
+ 
++    // Patch: daftar device yang sudah di-pairing, tanpa discovery (instan).
++    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
++    public Collection<BluetoothDevice> bondedDevices() throws IOException {
++        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
++        if (adapter == null) {
++            throw new IOException("Bluetooth not supported");
++        }
++        if (!adapter.isEnabled()) {
++            throw new IOException("Bluetooth is not enabled");
++        }
++        Set<BluetoothDevice> bonded = adapter.getBondedDevices();
++        return bonded != null ? bonded : new HashSet<>();
++    }
++
+     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+     public void pair(String address) throws IOException {
+         Logger.info("Attempting to pair with device: " + address);
+@@ -133,9 +153,30 @@ public class BluetoothClassic {
+                 throw new IOException("Unable to close before establishing a new connection.", e);
+             }
+ 
+-            BluetoothDevice target = BluetoothAdapter.getDefaultAdapter().getRemoteDevice(address);
+-            socket = target.createRfcommSocketToServiceRecord(SPP_ID);
+-            socket.connect();
++            BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
++            if (btAdapter == null) {
++                throw new IOException("Bluetooth adapter not available");
++            }
++            // Patch: discovery yang masih berjalan memperlambat/menggagalkan connect.
++            btAdapter.cancelDiscovery();
++            BluetoothDevice target = btAdapter.getRemoteDevice(address);
++            BluetoothSocket candidate = target.createRfcommSocketToServiceRecord(SPP_ID);
++            try {
++                candidate.connect();
++            } catch (IOException secureError) {
++                // Patch: sebagian printer murah menolak RFCOMM "secure" —
++                // coba sekali lagi dengan socket insecure sebelum menyerah.
++                Logger.warn("Secure RFCOMM connect failed, retrying insecure: " + secureError.getMessage());
++                closeQuietly(candidate);
++                candidate = target.createInsecureRfcommSocketToServiceRecord(SPP_ID);
++                try {
++                    candidate.connect();
++                } catch (IOException insecureError) {
++                    closeQuietly(candidate);
++                    throw insecureError;
++                }
++            }
++            socket = candidate;
+             inputStream = socket.getInputStream();
+             outputStream = socket.getOutputStream();
+             Logger.info("Successfully connected to device: " + address);
+@@ -150,6 +191,7 @@ public class BluetoothClassic {
+             }
+             Logger.debug("Writing " + data.length + " bytes");
+             outputStream.write(data);
++            outputStream.flush();
+         }
+     }
+ 
+@@ -293,12 +335,17 @@ public class BluetoothClassic {
+                 outputStream = null;
+             }
+             if (socket != null) {
+-                if (socket.isConnected()) {
+-                    socket.close();
+-                }
++                // Patch: tutup selalu, bukan hanya saat isConnected().
++                closeQuietly(socket);
+                 socket = null;
+             }
+             Logger.debug("Connection closed");
+         }
+     }
++
++    private static void closeQuietly(BluetoothSocket target) {
++        try {
++            target.close();
++        } catch (IOException ignore) {}
++    }
+ }
+diff --git a/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassicPlugin.java b/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassicPlugin.java
+index 4837b26..9bb84e6 100644
+--- a/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassicPlugin.java
++++ b/node_modules/@nosslabs/bluetooth-classic/android/src/main/java/com/nossdev/plugins/bluetoothclassic/BluetoothClassicPlugin.java
+@@ -117,6 +117,17 @@ public class BluetoothClassicPlugin extends Plugin {
+             .await();
+     }
+ 
++    // Patch: daftar device yang sudah di-pairing (instan, tanpa discovery).
++    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
++    @PluginMethod
++    public void bondedDevices(PluginCall call) {
++        try {
++            call.resolve(new JSObject().put("devices", toJSArrayDevices(implementation.bondedDevices())));
++        } catch (IOException e) {
++            call.reject(e.getMessage());
++        }
++    }
++
+     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+     @PluginMethod
+     public void pair(PluginCall call) {

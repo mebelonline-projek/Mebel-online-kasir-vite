@@ -8,11 +8,15 @@ import { VitePWA } from "vite-plugin-pwa";
 const THEME_COLOR = "#7A1F1F";
 const BACKGROUND_COLOR = "#F7F1E8";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
+      // APK (`npm run build:android`): aset sudah ada di dalam APK. Service
+      // worker di WebView justru bisa menyajikan versi lama setelah APK
+      // di-update, jadi tidak dibuat & tidak didaftarkan sama sekali.
+      disable: mode === "android",
       // Register sederhana (tanpa auto-reload client) — hindari blank putih loop
       registerType: "prompt",
       injectRegister: "script",
@@ -102,4 +106,4 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-});
+}));

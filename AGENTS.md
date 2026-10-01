@@ -35,3 +35,10 @@ Klien sudah fully on SPA. **Jangan** update / port fitur ke repo Next.
 ## Windows PowerShell
 
 Jangan `&&`. Pakai `;` atau perintah terpisah.
+
+## APK Android (Capacitor)
+
+- Detail lengkap: README bagian **"APK Android"**. Build APK **hanya** lewat `npm run build:android` / `npm run apk:release` (tanpa service worker), bukan `npm run build`.
+- Jangan hapus `patches/@nosslabs+bluetooth-classic+*.patch` (dipakai `bondedDevices` & connect yang tahan gagal).
+- Kunci rilis di luar repo (`C:\Users\USER\kunci-rilis-mebel\`) — jangan pernah commit `*.jks` / `keystore.properties`; tiap rilis naikkan `versionCode`.
+- Fitur yang memakai `<a download>`, `window.print()` atau `navigator.share` tidak jalan di WebView APK — simpan file lewat `saveBlob()` (`src/lib/save-file.ts`), cek APK dengan `Capacitor.isNativePlatform()`.

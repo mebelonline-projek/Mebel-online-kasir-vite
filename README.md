@@ -60,3 +60,36 @@ npm run dev
 1. Produksi tetap di repo Next (tag `v1-next-stable`).
 2. Beta hanya di `*.pages.dev` / subdomain `beta`.
 3. Cutover = DNS ke Pages. Gagal = DNS balik ke Next.
+
+## APK Android (cetak nota Bluetooth)
+
+SPA yang sama dibungkus **Capacitor** supaya HP Android bisa mencetak nota **langsung** ke printer thermal Bluetooth Classic (teks ESC/POS, tanpa Thermer/PNG). Aset web **dibundel di dalam APK** (bukan memuat situs live) — buka app tetap jalan tanpa internet; update tampilan = build & pasang APK baru.
+
+- `appId` permanen: `com.mebelonline.monitor` (ganti = dianggap aplikasi lain).
+- Build web untuk APK **wajib** `npm run build:android` (mode `android` → tanpa service worker; SW di WebView bisa menyajikan versi lama setelah update APK). `npm run build`/`deploy` untuk Workers tidak berubah.
+- Plugin `@nosslabs/bluetooth-classic` ditambal (`patches/`, dijalankan otomatis oleh `postinstall`): daftar printer yang sudah di-pairing (`bondedDevices`), connect hentikan discovery + fallback socket insecure, socket gagal ditutup. **Jangan hapus patch-nya.**
+- Kode: `src/lib/bluetooth-printer.ts` (izin, cari/pairing, antrean cetak, sambung ulang), `src/lib/thermal-escpos.ts` (isi nota 58/80mm, mode teks/gambar), `src/components/invoice/printer-settings-dialog.tsx` (Atur Printer di halaman Nota), `src/lib/save-file.ts` (PDF/CSV di APK → menu Bagikan Android).
+- Pengaturan printer (alamat, lebar kertas, mode) disimpan per HP di `localStorage`, bukan di Supabase.
+
+### Kunci rilis (wajib, sekali seumur aplikasi)
+
+Disimpan **di luar repo**: `C:\Users\USER\kunci-rilis-mebel\` (`mebel-rilis.jks` + `keystore.properties`; bisa diganti lewat env `MEBEL_KEYSTORE_PROPERTIES`). Build rilis **sengaja gagal** kalau kunci tidak ada. Semua APK yang dipasang di HP toko wajib ditandatangani kunci yang sama selamanya — kunci hilang = APK tidak bisa di-update (harus uninstall). **Backup folder itu ke minimal 2 tempat + catat kata sandinya terpisah.**
+
+Membuat kunci (oleh pemilik, kata sandi diketik sendiri):
+
+```
+keytool -genkeypair -v -keystore "C:\Users\USER\kunci-rilis-mebel\mebel-rilis.jks" -alias mebel -keyalg RSA -keysize 4096 -validity 36500
+```
+
+lalu ganti `GANTI_DENGAN_KATA_SANDI` di `keystore.properties` dengan kata sandi tersebut (dua baris, sama).
+
+### Build & pasang
+
+1. Naikkan `versionCode` (+1) dan `versionName` di `android/app/build.gradle` untuk tiap rilis baru.
+2. `npm run apk:release` → `android/app/build/outputs/apk/release/app-release.apk`.
+3. Pasang **menimpa** versi lama (jangan uninstall dulu): kirim file APK ke HP lalu buka, atau `adb install -r app-release.apk`.
+4. Jangan pasang build debug di HP toko (tanda tangan beda → update rilis ditolak).
+
+### Pemakaian printer (sekali per HP)
+
+Halaman Nota → **Atur Printer** → pilih printer (yang sudah dipasangkan langsung tampil; printer baru: **Cari Printer** lalu ketuk, isi PIN 0000/1234 bila diminta) → pilih lebar kertas → **Tes Cetak**. Jika tes keluar kosong/huruf aneh → mode **Gambar**. Setelah itu cukup tombol **Cetak Nota**.
