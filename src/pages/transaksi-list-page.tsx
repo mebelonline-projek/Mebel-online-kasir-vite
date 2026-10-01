@@ -218,8 +218,8 @@ export function TransaksiListPage() {
     statusValue !== "semua" ||
     fulfillmentValue !== "semua";
 
-  function handleExportCsv() {
-    downloadCsv(`transaksi-${new Date().toISOString().slice(0, 10)}.csv`, [
+  async function handleExportCsv() {
+    const result = await downloadCsv(`transaksi-${new Date().toISOString().slice(0, 10)}.csv`, [
       [
         "No Transaksi",
         "Pelanggan",
@@ -238,8 +238,9 @@ export function TransaksiListPage() {
         tx.fulfillment_status || "MENUNGGU",
         tx.created_at,
       ]),
-    ]);
-    toast.success("CSV berhasil diunduh");
+    ]).catch(() => null);
+    if (result === "saved") toast.success("CSV berhasil diunduh");
+    else if (result === null) toast.error("Gagal menyimpan CSV");
   }
 
   const emptyHint = debouncedQ

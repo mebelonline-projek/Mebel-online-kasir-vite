@@ -1,4 +1,5 @@
 import type { InvoiceData } from "@/components/invoice/invoice-document";
+import { saveBlob, type SaveFileResult } from "@/lib/save-file";
 
 /** Deteksi Android / HP untuk petunjuk UI cetak. */
 export function isMobilePrintClient(): boolean {
@@ -14,13 +15,9 @@ export async function renderNotaPdfBlob(data: InvoiceData): Promise<Blob> {
   return pdf(<NotaPdfDocument data={data} />).toBlob();
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+export function downloadBlob(
+  blob: Blob,
+  filename: string,
+): Promise<SaveFileResult> {
+  return saveBlob(blob, filename);
 }

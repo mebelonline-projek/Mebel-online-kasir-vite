@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
+import { Capacitor } from "@capacitor/core";
 import { ArrowLeft, Download, Printer, Trash2 } from "lucide-react";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { StoreLogo } from "@/components/shared/store-logo";
@@ -26,6 +27,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/auth-context";
+import { saveBlob } from "@/lib/save-file";
 import {
   deleteInvoice,
   getInvoiceById,
@@ -108,12 +110,7 @@ export function InvoiceDetailPage() {
         import("@/components/invoice/invoice-document"),
       ]);
       const blob = await pdf(<InvoiceDocument data={pdfData} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `INV-${pdfData.invoiceNumber}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await saveBlob(blob, `INV-${pdfData.invoiceNumber}.pdf`, "Invoice PDF");
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Gagal mengunduh PDF"
@@ -192,14 +189,17 @@ export function InvoiceDetailPage() {
               {isDownloading ? "Menyiapkan..." : "Unduh PDF"}
             </span>
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => window.print()}
-            className="gap-2"
-          >
-            <Printer className="h-4 w-4" />
-            <span className="hidden sm:inline">Cetak</span>
-          </Button>
+          {/* window.print() tidak berfungsi di WebView APK — pakai Unduh PDF. */}
+          {!Capacitor.isNativePlatform() && (
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              className="gap-2"
+            >
+              <Printer className="h-4 w-4" />
+              <span className="hidden sm:inline">Cetak</span>
+            </Button>
+          )}
         </div>
       </div>
 
