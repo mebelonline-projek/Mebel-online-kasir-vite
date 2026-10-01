@@ -13,6 +13,35 @@ Dokumen ini untuk AI agent / developer di **chat baru**. Jangan mengulang keputu
 
 ## Lanjut besok — baca ini dulu
 
+### Update 1 Okt 2026 — APK Android cetak nota Bluetooth (branch `apk-android`, **BELUM merge ke `main`**)
+
+**Tujuan:** nota di HP Android tercetak langsung ke printer thermal Bluetooth Classic (teks ESC/POS, tajam) — menggantikan alur lama PNG → bagikan ke Thermer yang hasilnya kurang bagus. Browser tidak bisa bicara ke printer Bluetooth Classic (Web Bluetooth hanya BLE), jadi SPA yang sama dibungkus **Capacitor** jadi APK. Aset web **dibundel di dalam APK** (bukan memuat situs live): app tetap terbuka tanpa internet; konsekuensinya tiap update tampilan = build & pasang APK baru (update klien jarang, jadi diterima).
+
+**Status:**
+- APK rilis **1.1** (`versionCode 2`), appId `com.mebelonline.monitor`, nama "Mebel Monitor". File: `C:\Users\USER\Downloads\MebelMonitor-1.1.apk`.
+- Ditandatangani kunci di **luar repo** `C:\Users\USER\kunci-rilis-mebel\` (dibuat pemilik). SHA-256 sertifikat: `016f2cac8364902569ad909521314f920daf5eb71c6564d59184254dac85d5d7` — setiap APK berikutnya wajib sama (`apksigner verify --print-certs`). Kunci hilang = APK di HP klien tidak bisa di-update.
+- Terpasang & dicek di Redmi uji: login OK, data sama dengan PWA iOS (Total 187 transaksi).
+- **Belum diuji ke printer fisik** (printer ada di klien). Yang sudah terverifikasi: build native, isi struk 58/80mm tidak ada baris melebihi lebar kertas (nominal ratusan juta, nama panjang), byte raster terbaca balik benar, UI dialog + alur pilih/cari/pasangkan/tes cetak dengan plugin Bluetooth tiruan di browser.
+
+**Yang dikerjakan (3 commit di `apk-android`):**
+1. `feat(android)` — Capacitor 8 + folder `android/`, `npm run build:android` (mode `android`, **tanpa service worker**), `npm run apk:release`, ikon dari logo, patch plugin `@nosslabs/bluetooth-classic` (`patches/`, via `postinstall`): `bondedDevices` (printer yang sudah di-pairing langsung tampil), scan ikut menyertakan device terpasang, connect hentikan discovery + fallback socket insecure, socket gagal ditutup.
+2. `fix(apk)` — `<a download>`/`window.print()` tidak jalan di WebView → `saveBlob()` (`src/lib/save-file.ts`) membuka menu Bagikan Android untuk PDF nota, PDF invoice, Export CSV. Tombol Cetak invoice disembunyikan di APK.
+3. `feat(nota)` — halaman Nota di APK: **Cetak Nota**, **Atur Printer** (pilih printer terpasang, Cari Printer, pasangkan + PIN, kertas 58/80mm, mode Teks/Gambar, Tes Cetak), **PDF**. Isi struk dirapikan untuk semua jalur (APK, Web Serial laptop, PNG Thermer): bungkus per kata, nominal yang tidak muat turun ke baris sendiri (tidak terpotong), nama toko & Total/Sisa huruf besar. Pengaturan printer per HP di `localStorage`.
+
+**Langkah berikutnya (di toko klien):**
+1. Pasang `MebelMonitor-1.1.apk` di HP Android klien, login.
+2. Nota → Atur Printer → izinkan "Perangkat sekitar" → pilih printer (yang dulu dipakai Thermer biasanya sudah terpasang) → pilih lebar kertas → **Tes Cetak**. Penggaris angka harus pas 1 baris. Kertas kosong / huruf aneh → mode **Gambar**, tes lagi.
+3. Cetak satu nota sungguhan. Kalau OK → merge `apk-android` ke `main` (cek dulu apakah push ke `main` memicu deploy otomatis Workers; perubahan web ikut: tata letak struk Web Serial & simpan file).
+4. Kalau gagal: catat pesan error / foto struk. Pesan galat ramah ada di `printerErrorMessage()` (`src/lib/bluetooth-printer.ts`).
+
+**Jebakan yang sempat terjadi (jangan ulang):**
+- Repo ini juga dikerjakan lewat **Cursor (cloud)** → `main` lokal bisa tertinggal dari `origin/main`. **Selalu `git fetch` & bandingkan sebelum membuat branch atau build APK.** APK 1.0 sempat dibangun dari versi lama (batas 50 transaksi yang sudah diperbaiki di GitHub) → diperbaiki di 1.1.
+- Update APK: naikkan `versionCode`, pasang **menimpa** (jangan uninstall). Jangan pasang build debug di HP klien.
+- Xiaomi menolak `adb install` (`INSTALL_FAILED_USER_RESTRICTED`) → `adb push` APK ke `/sdcard/Download` lalu pasang dari File Manager (Git Bash: `MSYS_NO_PATHCONV=1`).
+- Push repo ini butuh akun GitHub **`mebelonline-projek`**; laptop default aktif `izayrcy08-glitch` (repo kasir). Pindah sementara: `gh auth switch -h github.com -u mebelonline-projek` → push → switch balik.
+
+Detail teknis & cara build: README bagian **"APK Android"**; aturan agent: AGENTS.md bagian **"APK Android (Capacitor)"**.
+
 **Update 6 Agu:** Biaya dibebankan ke pembeli (ongkir) di SPA — tabel `transaction_customer_charges` applied; masuk nota, bukan omzet. SQL: `supabase/migrate_customer_charges.sql`.
 
 **Update 2 Agu malam (serah klien):** Register publik dikunci (`/register` → `/login`; user baru via OWNER Pengaturan User). Edge `apply-sale-stock` authz diperketat (SALE/restore) + redeploy. Kode migrasi di-commit; Workers redeploy. Klien pakai `workers.dev` (tanpa domain custom). Next/`vercel.app` = cadangan arsip.
